@@ -8,15 +8,13 @@ contract NewFi is ReentrancyGuardUpgradeSafe {
     using SafeERC20 for IERC20;
     using SafeMath for uint;
 
-    event AdvisorOnBoarded(string name, uint256 tradingExperience,  string twitterProfile, address pool,  uint256 stakedAmount);
+    event AdvisorOnBoarded(string name, address pool, uint256 stakedAmount);
 
     event Investment(uint256 _stablecoinAmount, address _advisor, address _poolAddress, uint256 _stableProportion, uint256 _volatileProportion);
 
 
 struct Advisor {
         string name;
-        uint256 tradingExperience;
-        string twitterProfile;
         address pool;
         uint256 stakedAmount;
     }
@@ -41,13 +39,11 @@ struct Advisor {
     /**
         Onboards a new Advisor
         @param _name Name of the Advisor.
-        @param _tradingExperience Trading exp in years for the investors in help choosing a particular advisor.
-        @param _twitterProfile Twitter username of the advisor.
      */
-    function onboard(string calldata _name, uint256 _tradingExperience, string calldata _twitterProfile) external {
-        advisorInfo[msg.sender] = Advisor(_name, _tradingExperience, _twitterProfile, address(0), 0);
+    function onboard(string calldata _name) external {
+        advisorInfo[msg.sender] = Advisor(_name, address(0), 0);
         advisors.push(msg.sender);
-        emit AdvisorOnBoarded(_name, _tradingExperience, _twitterProfile, address(0), 0);
+        emit AdvisorOnBoarded(_name, address(0), 0);
     }
     
     /**
