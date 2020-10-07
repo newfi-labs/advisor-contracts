@@ -4,7 +4,7 @@ import "@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/IERC20.so
 import "@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts-ethereum-package/contracts/utils/ReentrancyGuard.sol";
 
-contract NewFi is ReentrancyGuardUpgradeSafe {
+contract NewfiAdvisor is ReentrancyGuardUpgradeSafe {
     using SafeERC20 for IERC20;
     using SafeMath for uint;
 
@@ -13,7 +13,7 @@ contract NewFi is ReentrancyGuardUpgradeSafe {
     event Investment(uint256 _stablecoinAmount, address _advisor, address _poolAddress, uint256 _stableProportion, uint256 _volatileProportion);
 
 
-struct Advisor {
+    struct Advisor {
         string name;
         address pool;
         uint256 stakedAmount;
@@ -50,7 +50,7 @@ struct Advisor {
         Investor deposits liquidity to advisor pools
         @param _stablecoin address of stablecoin.
         @param _stablecoinAmount amount of stable coin.
-        @param _advisor address os selected advisorr.
+        @param _advisor address os selected advisor.
         @param _poolAddress address of advisor's pool to be created by gnosis sdk.
         @param _stableProportion stable coin proportion used to invest in protocols.
         @param _volatileProportion stable coin proportion used to invest in protocols.
