@@ -6,7 +6,41 @@ import "@openzeppelin/contracts-ethereum-package/contracts/utils/ReentrancyGuard
 import "@openzeppelin/contracts-ethereum-package/contracts/Initializable.sol";
 import "./utils/ProxyFactory.sol";
 import "./utils/OwnableUpgradeSafe.sol";
+// NOTE - Was getting a file import issue so placed the interfaces here only for now
+// Yearn Interface
+interface YearnVault {
+    // deposit for stable coins
+    function deposit(uint256 _amount) external;
 
+    function depositETH() external payable;
+
+    function withdrawETH(uint256 _shares) external payable;
+
+    function withdraw(uint256 _shares) external;
+}
+
+// would be a 2 step although all in 1 tx
+// for generating yield
+// 1. deposit usdc to Masset Contract
+// 2. deposit received musd to saving contract
+// for unwinding
+// 1. withdraw from savings contract
+// 2. withdraw the recieved musd from masset contract
+interface MAsset {
+    function mint(address _bAsset, uint256 _bAssetQuanity)
+        external
+        returns (uint256 massetMinted);
+
+    function redeem(address _bAsset, uint256 _bAssetQuanity)
+        external
+        returns (uint256 massetRedeemed);
+}
+
+interface SavingsContract {
+    function deposit(uint256 _amount) external returns (uint256 creditIssued);
+
+    function withdraw(uint256 _amount) external;
+}
 
 contract PoolProxy is Initializable, OwnableUpgradeSafe {
     event Initialized(address indexed thisAddress);
@@ -27,7 +61,12 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory {
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
 
-    event AdvisorOnBoarded(string name, address stablePool, address volatilePool, uint256 stakedAmount);
+    event AdvisorOnBoarded(
+        string name,
+        address stablePool,
+        address volatilePool,
+        uint256 stakedAmount
+    );
 
     event Investment(
         uint256 _stablecoinAmount,
@@ -61,13 +100,23 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory {
     address[] public investors;
 
     address public proxyBaseAddress;
+    // Since it will be fixed
+    address public massetAddress;
+
+    address public savingContract;
 
     /**
         Constructor
         @param _proxy Address of the proxy contract defined above to create clones.
      */
-    constructor(address _proxy) public {
-      proxyBaseAddress = _proxy;
+    constructor(
+        address _proxy,
+        address _massetAddress,
+        address _savingsContract
+    ) public {
+        proxyBaseAddress = _proxy;
+        massetAddress = _massetAddress;
+        savingContract = _savingsContract;
     }
 
     /**
@@ -138,16 +187,15 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory {
     /**
         @param _advisor Address of the Advisor.
      */
-    function createProxy(address _advisor) internal returns(address) {
-    bytes memory _payload = abi.encodeWithSignature(
-      "initialize(address)",
-      _advisor
-    );
-    // Deploy proxy
-    // for testing the address of the proxy contract which will
-    // be used to redirect interest will come here
-    address _intermediate = deployMinimal(proxyBaseAddress, _payload);
-    return _intermediate;
-
-  }
+    function createProxy(address _advisor) internal returns (address) {
+        bytes memory _payload = abi.encodeWithSignature(
+            "initialize(address)",
+            _advisor
+        );
+        // Deploy proxy
+        // for testing the address of the proxy contract which will
+        // be used to redirect interest will come here
+        address _intermediate = deployMinimal(proxyBaseAddress, _payload);
+        return _intermediate;
+    }
 }
