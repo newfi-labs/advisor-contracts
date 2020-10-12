@@ -47,13 +47,27 @@ interface MAsset {
 }
 
 interface SavingsContract {
-    function deposit(uint256 _amount) external returns (uint256 creditIssued);
+    function depositSavings(uint256 _amount)
+        external
+        returns (uint256 creditsIssued);
 
-    function withdraw(uint256 _amount) external;
+    function redeem(uint256 _credits) external returns (uint256 massetReturned);
+
+    function exchangeRate() external view returns (uint256);
 }
 
 contract StablePoolProxy is Initializable, OwnableUpgradeSafe {
+    using SafeMath for uint256;
+    using SafeERC20 for IERC20;
+
     event Initialized(address indexed thisAddress);
+
+    struct Investment {
+        uint256 amount;
+        uint256 depositTime;
+    }
+
+    mapping(address => Investment) public investmentTracker;
 
     function initialize(address _advisor) public initializer {
         OwnableUpgradeSafe.__Ownable_init();
@@ -65,15 +79,63 @@ contract StablePoolProxy is Initializable, OwnableUpgradeSafe {
         address _mAsset,
         address _bAsset,
         uint256 _amount,
-        address _savings
+        address _savings,
+        address _investor
     ) external {
         uint256 mAsset = MAsset(_mAsset).mint(_bAsset, _amount);
-        SavingsContract(_savings).deposit(mAsset);
+        Investment storage investments = investmentTracker[_investor];
+        investments.amount = investments.amount.add(_amount);
+        investments.depositTime = now;
+        SavingsContract(_savings).depositSavings(mAsset);
+    }
+
+    function redeemAmount(
+        address _investor,
+        address _advisor,
+        address _mAsset,
+        address _savings,
+        address _stablecoin
+    ) external {
+        Investment storage investments = investmentTracker[_investor];
+        require(investments.amount > 0, "No Investment Amount");
+        uint256 amountLockInDuration = now.sub(investments.depositTime);
+        uint256 exchangeRate = SavingsContract(_savings).exchangeRate();
+        uint256 investorAccuringExchangeRate = (
+            exchangeRate.mul(amountLockInDuration)
+        )
+            .div(86400);
+        uint256 investorCreditBalance = investments.amount.mul(
+            investorAccuringExchangeRate
+        );
+        uint256 mAssetAmount = SavingsContract(_savings).redeem(
+            investorCreditBalance
+        );
+        uint256 investorNetRedeemAmount = MAsset(_mAsset).redeem(
+            _stablecoin,
+            mAssetAmount
+        );
+        // 1 % per investor
+        uint256 advisorFee = (investorNetRedeemAmount.mul(1)).div(100);
+        investorNetRedeemAmount = investorNetRedeemAmount.sub(advisorFee);
+        IERC20(_stablecoin).safeTransfer(_advisor, advisorFee);
+        IERC20(_stablecoin).safeTransfer(_investor, investorNetRedeemAmount);
     }
 }
 
 contract VolatilePoolProxy is Initializable, OwnableUpgradeSafe, Helper {
+    using SafeMath for uint256;
+    using SafeERC20 for IERC20;
+
     event Initialized(address indexed thisAddress);
+    // Since with yearn you can onvest in both categories
+    struct Investment {
+        uint256 stableAmount;
+        uint256 volatileAmount;
+        uint256 stableCoinDepositTime;
+        uint256 volatileCoinDepositTime;
+    }
+
+    mapping(address => Investment) public investmentTracker;
 
     function initialize(address _advisor) public initializer {
         OwnableUpgradeSafe.__Ownable_init();
@@ -81,21 +143,91 @@ contract VolatilePoolProxy is Initializable, OwnableUpgradeSafe, Helper {
         emit Initialized(address(this));
     }
 
-    function investYearn(address[] memory yearnVault, uint256[] memory _amount)
-        external
-    {
+    function investYearn(
+        address[] memory yearnVault,
+        uint256[] memory _amount,
+        address _investor
+    ) external {
         require(
             yearnVault.length == _amount.length,
             "Sanity Check: Yearn Vault"
         );
+        Investment storage investments = investmentTracker[_investor];
         for (uint256 i = 0; i < _amount.length; i++) {
+            investments.stableAmount = investments.stableAmount.add(_amount[i]);
             if (yearnVault[i] == getETHVault()) {
-                YearnVault(yearnVault[i]).depositETH{value: _amount[0]}();
+                investments.volatileAmount = investments.volatileAmount.add(
+                    _amount[i]
+                );
+                investments.stableCoinDepositTime = now;
+                YearnVault(yearnVault[i]).depositETH{value: _amount[i]}();
             } else {
                 // since having stable amount for yearn is not mandatory
                 if (_amount[i] > 0) {
+                    investments.volatileCoinDepositTime = now;
                     YearnVault(yearnVault[i]).deposit(_amount[1]);
                 }
+            }
+        }
+    }
+
+    function redeemAmount(
+        address _investor,
+        address _advisor,
+        uint256[] calldata _roi,
+        address[] calldata _vault,
+        address _stablecoin
+    ) external {
+        Investment storage investments = investmentTracker[_investor];
+        for (uint256 i = 0; i < _vault.length; i++) {
+            if (_vault[i] == getETHVault()) {
+                uint256 volatileLockInDuration = now.sub(
+                    investments.volatileCoinDepositTime
+                );
+                // 86400 * 365 = 31536000 since roi is year based
+                uint256 volatileAccuredRate = _roi[i]
+                    .mul(volatileLockInDuration)
+                    .div(31536000);
+                uint256 investorAccureAmount = investments.volatileAmount.add(
+                    (
+                        investments.volatileAmount.mul(volatileAccuredRate).div(
+                            100
+                        )
+                    )
+                );
+                YearnVault(_vault[i]).withdrawETH(investorAccureAmount);
+                // 1 % per investor
+                uint256 advisorFee = (investorAccureAmount.mul(1)).div(100);
+                investorAccureAmount = investorAccureAmount.sub(advisorFee);
+                (bool advisorTransferCheck, ) = _advisor.call{
+                    value: advisorFee
+                }("");
+                require(advisorTransferCheck, "Advisor Transfer failed.");
+                (bool investorTransferCheck, ) = _investor.call{
+                    value: investorAccureAmount
+                }("");
+                require(investorTransferCheck, "Investor Transfer failed.");
+                // transfer eth to both
+            } else {
+                uint256 stableLockInDuration = now.sub(
+                    investments.stableCoinDepositTime
+                );
+                // 86400 * 365 = 31536000 since roi is year based
+                uint256 stableAccuredRate = _roi[i]
+                    .mul(stableLockInDuration)
+                    .div(31536000);
+                uint256 investorAccureAmount = investments.stableAmount.add(
+                    (investments.stableAmount.mul(stableAccuredRate).div(100))
+                );
+                YearnVault(_vault[i]).withdraw(investorAccureAmount);
+                // 1 % per investor
+                uint256 advisorFee = (investorAccureAmount.mul(1)).div(100);
+                investorAccureAmount = investorAccureAmount.sub(advisorFee);
+                IERC20(_stablecoin).safeTransfer(_advisor, advisorFee);
+                IERC20(_stablecoin).safeTransfer(
+                    _investor,
+                    investorAccureAmount
+                );
             }
         }
     }
@@ -110,8 +242,7 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory {
     event AdvisorOnBoarded(
         string name,
         address stablePool,
-        address volatilePool,
-        uint256 stakedAmount
+        address volatilePool
     );
 
     event Investment(
@@ -125,7 +256,6 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory {
         string name;
         address stablePool;
         address payable volatilePool;
-        uint256 stakedAmount;
     }
 
     struct Investor {
@@ -183,11 +313,10 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory {
         advisorInfo[msg.sender] = Advisor(
             _name,
             stablePool,
-            address(uint160(volatilePool)),
-            0
+            address(uint160(volatilePool))
         );
         advisors.push(msg.sender);
-        emit AdvisorOnBoarded(_name, stablePool, volatilePool, 0);
+        emit AdvisorOnBoarded(_name, stablePool, volatilePool);
     }
 
     /**
@@ -252,45 +381,62 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory {
         @param _mstableInvestmentAmount amount of stablecoin to invest in mstable.
         @param _yearnInvestmentAmounts amount array of both types of assets to be invested in yearn.
         @param _yearnVaults vault address array of both types of assets to be invested in yearn.
-        // This function assumes that based on the investors proption  and liquidity in both pools stored in the struct visible on ui, the advisors selects the amount to invest in yearn, mstable we can have that logic here as well
-        // need to refactor stake calculation for assumptiom taken it to be 50 %
      */
     function protocolInvestment(
+        address _investor,
         address _mstableInvestmentAsset,
         uint256 _mstableInvestmentAmount,
         uint256[] memory _yearnInvestmentAmounts,
         address[] memory _yearnVaults
     ) public {
-        uint256 _totalAmount = 0;
-        // Max size will be 2 only
-        for (uint256 i = 0; i < _yearnInvestmentAmounts.length; i++) {
-            _totalAmount = _totalAmount.add(_yearnInvestmentAmounts[i]);
-        }
-        _totalAmount = _totalAmount.add(_mstableInvestmentAmount);
-
-        // Just taking 50 % stake now this will change
-        uint256 advisorStake = _totalAmount.div(2);
         Advisor storage advisor = advisorInfo[msg.sender];
-        advisor.stakedAmount = advisorStake;
-
-        // Currently staking only in stable pool since volatile pool is only for eth, but we can change this and do 50%
-        IERC20(_mstableInvestmentAsset).safeTransferFrom(
-            address(this),
-            advisor.stablePool,
-            advisorStake
-        );
         // calling the functions in proxy contract since amount is stored there so broken them into 2 different proxies
         if (_mstableInvestmentAmount > 0) {
             StablePoolProxy(advisor.stablePool).investMStable(
                 massetAddress,
                 _mstableInvestmentAsset,
                 _mstableInvestmentAmount,
-                savingContract
+                savingContract,
+                _investor
             );
         }
         VolatilePoolProxy(advisor.volatilePool).investYearn(
             _yearnVaults,
-            _yearnInvestmentAmounts
+            _yearnInvestmentAmounts,
+            _investor
+        );
+    }
+
+    /**
+        Investor Unwinding their position
+        @param _advisor Address of the advisor.
+        @param _vault the respective yearn vault addresses.
+        @param _roi the roi of each vault to be fetched by https://yearn.tools/#/Vaults/get_vaults_apy.
+        @param _stablecoin address of stablecoin to invest in mstable, will take usdc for hack.
+     */
+    function unwind(
+        address _advisor,
+        address[] calldata _vault,
+        uint256[] calldata _roi,
+        address _stablecoin
+    ) external {
+        Advisor storage advisor = advisorInfo[_advisor];
+        require(_vault.length == _roi.length, "Invalid Inputs");
+
+        StablePoolProxy(advisor.stablePool).redeemAmount(
+            msg.sender,
+            _advisor,
+            massetAddress,
+            savingContract,
+            _stablecoin
+        );
+
+        VolatilePoolProxy(advisor.volatilePool).redeemAmount(
+            msg.sender,
+            _advisor,
+            _roi,
+            _vault,
+            _stablecoin
         );
     }
 
