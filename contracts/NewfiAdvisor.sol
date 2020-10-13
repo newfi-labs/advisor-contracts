@@ -1,11 +1,11 @@
-pragma solidity ^0.6.2;
+pragma solidity ^0.6.0;
 
 import "@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts-ethereum-package/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts-ethereum-package/contracts/Initializable.sol";
+import "@openzeppelin/contracts-ethereum-package/contracts/access/Ownable.sol";
 import "./utils/ProxyFactory.sol";
-import "./utils/OwnableUpgradeSafe.sol";
 
 contract Helper {
     /**
@@ -339,7 +339,7 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory {
     ) external payable nonReentrant {
         require(
             _stableProportion != 0 || _volatileProportion != 0,
-            "Both propotions are 0"
+            "Both proportions are 0"
         );
         Advisor storage advisor = advisorInfo[_advisor];
         IERC20(_stablecoin).safeTransferFrom(

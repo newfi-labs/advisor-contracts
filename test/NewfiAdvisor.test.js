@@ -1,7 +1,6 @@
 const { accounts, contract } = require('@openzeppelin/test-environment');
 
 const NewfiAdvisor = contract.fromArtifact('NewfiAdvisor');
-
 const IERC20 = contract.fromArtifact('IERC20');
 
 const { BN } = require('@openzeppelin/test-helpers');
@@ -22,6 +21,13 @@ describe('NewfiAdvisor', async () => {
         { from: owner });
         await usdc.transfer(advisor, new BN("10000000000000000000"), {from : unlokedAddress});
         await usdc.transfer(investor, new BN("10000000000000000000"), {from : unlokedAddress});
+
+        describe('NewfiAdvisor', () => {
+    const [ owner, deployer ] = accounts;
+    let contract;
+
+    beforeEach(async () => {
+        // contract = await NewfiAdvisor.new(owner, { from: deployer });
     });
 
     it('onboards a new advisor', async () => {
