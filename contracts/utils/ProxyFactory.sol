@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
+
 pragma solidity ^0.6.0;
 
 // solium-disable security/no-inline-assembly

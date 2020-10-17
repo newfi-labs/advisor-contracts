@@ -3,13 +3,13 @@ const NewfiTokenFactory = contract.fromArtifact('NewfiTokenFactory');
 const NewfiToken = contract.fromArtifact('NewfiToken');
 
 describe('NewfiTokenFactory', () => {
-    const [ owner, deployer ] = accounts;
+    const [ owner ] = accounts;
     let logic;
     let factory;
 
     beforeEach(async () => {
-        logic = await NewfiToken.new(owner, { from: deployer });
-        factory = await NewfiTokenFactory.new(owner, { from: deployer });
+        logic = await NewfiToken.new({ from: owner });
+        factory = await NewfiTokenFactory.new({ from: owner });
     });
 
     it('creates n+1 newfi tokens', async () => {

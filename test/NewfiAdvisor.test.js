@@ -1,53 +1,196 @@
-const { accounts, contract } = require('@openzeppelin/test-environment');
+const { accounts, contract, web3 } = require('@openzeppelin/test-environment');
+const { expectEvent, ether } = require('@openzeppelin/test-helpers');
 
 const NewfiAdvisor = contract.fromArtifact('NewfiAdvisor');
-const IERC20 = contract.fromArtifact('IERC20');
+const StablePoolProxy = contract.fromArtifact('StablePoolProxy');
+const VolatilePoolProxy = contract.fromArtifact('VolatilePoolProxy');
+const MockToken = contract.fromArtifact('MockToken');
 
-const { BN } = require('@openzeppelin/test-helpers');
-
-describe('NewfiAdvisor', async () => {
-    const [ owner, advisor, investor ] = accounts;
-    const unlokedAddress = 0xa5407eae9ba41422680e2e00537571bcc53efbfd;
-    const usdc = await IERC20.at(0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48);
+describe('NewfiAdvisor', () => {
+    const [ mainAdvisor, secondAdvisor, investor ] = accounts;
     let contract;
+    let mockToken;
+    let stableProxy;
+    let volatileProxy;
 
     beforeEach(async () => {
-        contract = await NewfiAdvisor.new(
-        // deployed by forking mainnet in ganache
-        0xd62c837e2059ae5723ab0f084deb5cbfb4dbef3a,
-        0x3d5c8955bd6aaa778018309acfd8a5b30b4e86ee,
-        0xe2f2a5C287993345a840Db3B0845fbC70f5935a5,
-        0xcf3f73290803fc04425bee135a4caeb2bab2c2a1,
-        { from: owner });
-        await usdc.transfer(advisor, new BN("10000000000000000000"), {from : unlokedAddress});
-        await usdc.transfer(investor, new BN("10000000000000000000"), {from : unlokedAddress});
+        // Proxy pools are initialized in the NewfiAdvisor init function.
+        stableProxy = await StablePoolProxy.new({ from: mainAdvisor });
+        volatileProxy = await VolatilePoolProxy.new({ from: mainAdvisor });
+        contract = await NewfiAdvisor.new({ from: mainAdvisor });
+        mockToken = await MockToken.new({ from: mainAdvisor });
 
-        describe('NewfiAdvisor', () => {
-    const [ owner, deployer ] = accounts;
-    let contract;
+        // Onboard a main advisor
+        await contract.initialize(
+            'Mock Advisor',
+            stableProxy.address,
+            volatileProxy.address,
+            60,
+            40,
+          { from: mainAdvisor });
 
-    beforeEach(async () => {
-        // contract = await NewfiAdvisor.new(owner, { from: deployer });
+        // Onboard second advisor
+        await contract.initialize(
+            'Second Advisor',
+            stableProxy.address,
+            volatileProxy.address,
+            50,
+            50,
+            { from: secondAdvisor }
+        )
     });
 
-    it('onboards a new advisor', async () => {
-        await contract.onboard("Mock Advisor", { from: owner });
-        const advisorInfo = await contract.advisorInfo(advisor);
-
-        expect(advisorInfo.name).toEqual('Mock Advisor');
+    describe('advisor', () => {
+        it('can get name', async () => {
+            const name = await contract.advisorName(mainAdvisor);
+            expect(name).toEqual('Mock Advisor');
+        });
     });
 
-    it('onboards a new investor with them selecting a advisor', async () => {
-        await usdc.approve(contract.address, new BN("300000000000"), {from: investor})
-        await contract.invest(usdc.address, new BN("200000"), advisor, 80, 20, { from: investor, value: new BN("1000") });
-        const investorInfo = await contract.investorInfo(investor);
+    describe('investors', () => {
+        beforeEach(async () => {
+            await mockToken.mintTokens(10000, { from: investor });
+            await mockToken.increaseAllowance(contract.address, 10000, { from: investor });
+        });
 
-        expect(investorInfo.stablePoolLiquidity).toEqual(new BN("200000"));
-    });
+        it('can add stable pool liquidity', async () => {
+            const receipt = await contract.invest(
+              mockToken.address,
+              1000,
+              mainAdvisor,
+              100,
+              0,
+              { from: investor },
+            );
 
-    it('allows the advisor to stake and invest into protocols ', async () => {
-        await usdc.approve(contract.address, new BN("300000000000"), {from: advisor})
-        await contract.protocolInvestment(usdc.address, new BN("200000"), [new BN("1000")], [0xe1237aA7f535b0CC33Fd973D66cBf830354D16c7], { from: advisor });
+            expectEvent(receipt, 'Investment', {
+                _stablecoinAmount: '1000',
+                _volatileAmount: '0',
+                _advisor: mainAdvisor
+            });
+        });
 
+        it('can add volatile pool liquidity', async () => {
+            const receipt = await contract.invest(
+                mockToken.address,
+                1000,
+                mainAdvisor,
+                0,
+                100,
+                { from: investor },
+            );
+
+            expectEvent(receipt, 'Investment', {
+                _stablecoinAmount: '0',
+                _volatileAmount: '1000',
+                _advisor: mainAdvisor
+            });
+        });
+
+        it('can add both volatile and stable pool liquidity', async () => {
+            const receipt = await contract.invest(
+                mockToken.address,
+                1000,
+                mainAdvisor,
+                60,
+                40,
+                { from: investor },
+            );
+
+            expectEvent(receipt, 'Investment', {
+                _stablecoinAmount: '600',
+                _volatileAmount: '400',
+                _advisor: mainAdvisor
+            });
+        });
+
+        it('can invest eth into advisor', async () => {
+            const receipt = await contract.invest(
+                mockToken.address,
+                0,
+                mainAdvisor,
+                0,
+                100,
+                { from: investor, value: ether('25') }
+            );
+
+            const volatilePool = await contract.advisorVolatilePool(mainAdvisor);
+            const balance = await web3.eth.getBalance(volatilePool);
+
+            expect(balance / (10 ** 18)).toEqual(25);
+            expectEvent(receipt, 'Investment', {
+                _stablecoinAmount: '0',
+                _volatileAmount: '0',
+                _ethAmount: '25',
+                _advisor: mainAdvisor
+            });
+        });
+
+        it('can invest more into the same advisor', async () => {
+            await contract.invest(
+                mockToken.address,
+                1000,
+                mainAdvisor,
+                60,
+                40,
+                { from: investor },
+            );
+            const receipt = await contract.invest(
+                mockToken.address,
+                1000,
+                mainAdvisor,
+                50,
+                50,
+                { from: investor },
+            );
+            const  stablePoolLiquidity = await contract.investorStableLiquidity(investor);
+            const volatileLiquidity = await contract.investorVolatileLiquidity(investor);
+
+            expect(stablePoolLiquidity.toString()).toEqual('1100');
+            expect(volatileLiquidity.toString()).toEqual('900');
+
+            expectEvent(receipt, 'Investment', {
+                _stablecoinAmount: '500',
+                _volatileAmount: '500',
+                _advisor: mainAdvisor
+            });
+        });
+
+        it('can invest into two different advisors', async () => {
+            const firstReceipt = await contract.invest(
+                mockToken.address,
+                1000,
+                mainAdvisor,
+                60,
+                40,
+                { from: investor },
+            );
+            const secondReceipt = await contract.invest(
+                mockToken.address,
+                1000,
+                secondAdvisor,
+                50,
+                50,
+                { from: investor },
+            );
+            const  stablePoolLiquidity = await contract.investorStableLiquidity(investor);
+            const volatileLiquidity = await contract.investorVolatileLiquidity(investor);
+            const advisors = await contract.getAdvisors(investor);
+
+            expect(stablePoolLiquidity.toString()).toEqual('1100');
+            expect(volatileLiquidity.toString()).toEqual('900');
+            expect(advisors).toEqual([mainAdvisor, secondAdvisor]);
+
+            expectEvent(firstReceipt, 'Investment', {
+                _stablecoinAmount: '600',
+                _volatileAmount: '400',
+                _advisor: mainAdvisor
+            });
+            expectEvent(secondReceipt, 'Investment', {
+                _stablecoinAmount: '500',
+                _volatileAmount: '500',
+                _advisor: secondAdvisor
+            });
+        })
     });
 });
