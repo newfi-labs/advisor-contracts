@@ -1,10 +1,12 @@
 const { accounts, contract, web3 } = require('@openzeppelin/test-environment');
 const { expectEvent, ether } = require('@openzeppelin/test-helpers');
+const timeMachine = require("ganache-time-traveler");
 
 const NewfiAdvisor = contract.fromArtifact('NewfiAdvisor');
 const StablePoolProxy = contract.fromArtifact('StablePoolProxy');
 const VolatilePoolProxy = contract.fromArtifact('VolatilePoolProxy');
 const MockToken = contract.fromArtifact('MockToken');
+const IERC20 = contract.fromArtifact("IERC20");
 
 describe('NewfiAdvisor', () => {
     const [ mainAdvisor, secondAdvisor, investor ] = accounts;
@@ -12,11 +14,16 @@ describe('NewfiAdvisor', () => {
     let mockToken;
     let stableProxy;
     let volatileProxy;
+    // mimicking mainnet scenario
+    // const USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    // const usdcInstance = IERC20.at(USDC);
+    // // Account with mainnet usdc
+    // const unlockAddress = "0x2a549b4af9ec39b03142da6dc32221fc390b5533";
 
     beforeEach(async () => {
         // Proxy pools are initialized in the NewfiAdvisor init function.
-        stableProxy = await StablePoolProxy.new({ from: mainAdvisor });
-        volatileProxy = await VolatilePoolProxy.new({ from: mainAdvisor });
+        stableProxy = await StablePoolProxy.new(mainAdvisor, { from: mainAdvisor });
+        volatileProxy = await VolatilePoolProxy.new(mainAdvisor, { from: mainAdvisor });
         contract = await NewfiAdvisor.new({ from: mainAdvisor });
         mockToken = await MockToken.new({ from: mainAdvisor });
 
@@ -64,6 +71,7 @@ describe('NewfiAdvisor', () => {
             );
 
             expectEvent(receipt, 'Investment', {
+                investor: investor,
                 _stablecoinAmount: '1000',
                 _volatileAmount: '0',
                 _advisor: mainAdvisor
@@ -81,8 +89,9 @@ describe('NewfiAdvisor', () => {
             );
 
             expectEvent(receipt, 'Investment', {
+                investor: investor,
                 _stablecoinAmount: '0',
-                _volatileAmount: '1000',
+                _volatileAmount: '1000000000000000',
                 _advisor: mainAdvisor
             });
         });
@@ -98,8 +107,9 @@ describe('NewfiAdvisor', () => {
             );
 
             expectEvent(receipt, 'Investment', {
+                investor: investor,
                 _stablecoinAmount: '600',
-                _volatileAmount: '400',
+                _volatileAmount: '400000000000000',
                 _advisor: mainAdvisor
             });
         });
@@ -119,9 +129,9 @@ describe('NewfiAdvisor', () => {
 
             expect(balance / (10 ** 18)).toEqual(25);
             expectEvent(receipt, 'Investment', {
+                investor: investor,
                 _stablecoinAmount: '0',
-                _volatileAmount: '0',
-                _ethAmount: '25',
+                _volatileAmount: ether('25'),
                 _advisor: mainAdvisor
             });
         });
@@ -147,11 +157,12 @@ describe('NewfiAdvisor', () => {
             const volatileLiquidity = await contract.investorVolatileLiquidity(investor);
 
             expect(stablePoolLiquidity.toString()).toEqual('1100');
-            expect(volatileLiquidity.toString()).toEqual('900');
+            expect(volatileLiquidity.toString()).toEqual('900000000000000');
 
             expectEvent(receipt, 'Investment', {
+                investor: investor,
                 _stablecoinAmount: '500',
-                _volatileAmount: '500',
+                _volatileAmount: '500000000000000',
                 _advisor: mainAdvisor
             });
         });
@@ -178,19 +189,76 @@ describe('NewfiAdvisor', () => {
             const advisors = await contract.getAdvisors(investor);
 
             expect(stablePoolLiquidity.toString()).toEqual('1100');
-            expect(volatileLiquidity.toString()).toEqual('900');
+            expect(volatileLiquidity.toString()).toEqual('900000000000000');
             expect(advisors).toEqual([mainAdvisor, secondAdvisor]);
 
             expectEvent(firstReceipt, 'Investment', {
+                investor: investor,
                 _stablecoinAmount: '600',
-                _volatileAmount: '400',
+                _volatileAmount: '400000000000000',
                 _advisor: mainAdvisor
             });
             expectEvent(secondReceipt, 'Investment', {
+                investor: investor,
                 _stablecoinAmount: '500',
-                _volatileAmount: '500',
+                _volatileAmount: '500000000000000',
                 _advisor: secondAdvisor
             });
-        })
+        });
+
+        // it('can invest the funds into protocol', async () => {
+        //     await usdcInstance.approve(contract.address, 10000000, {from : unlockAddress});
+        //     let receipt = await contract.invest(
+        //         usdcInstance.address,
+        //         1000,
+        //         mainAdvisor,
+        //         0,
+        //         100,
+        //         { from: unlockAddress },
+        //     );
+        //
+        //     expectEvent(receipt, 'Investment', {
+        //         investor: unlockAddress,
+        //         _stablecoinAmount: '0',
+        //         _volatileAmount: '1000',
+        //         _advisor: mainAdvisor
+        //     });
+        //     receipt = await contract.protocolInvestment(usdcInstance.address, {from : mainAdvisor})
+        //
+        //     expectEvent(receipt, 'ProtocolInvestment', {
+        //         advisor: mainAdvisor,
+        //         mstableShare: '0',
+        //         yearnShare: '1000'
+        //     });
+        // });
+        //
+        // it('can invest the funds into protocol and unwind the position', async () => {
+        //     await usdcInstance.approve(contract.address, 10000000, {from : unlockAddress});
+        //     let receipt = await contract.invest(
+        //         usdcInstance.address,
+        //         1000,
+        //         mainAdvisor,
+        //         0,
+        //         100,
+        //         { from: unlockAddress },
+        //     );
+        //
+        //     expectEvent(receipt, 'Investment', {
+        //         investor: unlockAddress,
+        //         _stablecoinAmount: '0',
+        //         _volatileAmount: '1000',
+        //         _advisor: mainAdvisor
+        //     });
+        //     receipt = await contract.protocolInvestment(usdcInstance.address, {from : mainAdvisor})
+        //
+        //     expectEvent(receipt, 'ProtocolInvestment', {
+        //         advisor: mainAdvisor,
+        //         mstableShare: '0',
+        //         yearnShare: '1000'
+        //     });
+        //     // advancing 1 month for yield accural
+        //     await timeMachine.advanceTimeAndBlock(2592000);
+        //     receipt = await contract.unwind(mainAdvisor, usdcInstance.address, {from : unlockAddress})
+        // });
     });
 });

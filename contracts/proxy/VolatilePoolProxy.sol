@@ -13,12 +13,19 @@ contract Helper {
     function getETHVault() public pure returns (address ethVault) {
         ethVault = 0xe1237aA7f535b0CC33Fd973D66cBf830354D16c7;
     }
+
+    // creating this due to stack too deep error
+    function getUSDCVault() public pure returns (address usdcVault) {
+        usdcVault = 0x597aD1e0c13Bfe8025993D9e79C69E1c0233522e;
+    }
 }
 
 interface YearnController {
-    function withdraw(address, uint) external;
-    function balanceOf(address) external view returns (uint);
-    function earn(address, uint) external;
+    function withdraw(address, uint256) external;
+
+    function balanceOf(address) external view returns (uint256);
+
+    function earn(address, uint256) external;
 }
 
 // NOTE - Was getting a file import issue so placed the interfaces here only for now
@@ -35,7 +42,7 @@ interface YearnVault {
 
     function balanceOf(address account) external view returns (uint256);
 
-    function balance() external view returns (uint);
+    function balance() external view returns (uint256);
 
     function totalSupply() external view returns (uint256);
 
@@ -43,7 +50,7 @@ interface YearnVault {
 
     function token() external view returns (address);
 
-    function getPricePerFullShare() external view returns (uint);
+    function getPricePerFullShare() external view returns (uint256);
 }
 
 contract VolatilePoolProxy is Initializable, OwnableUpgradeSafe, Helper {
@@ -52,90 +59,140 @@ contract VolatilePoolProxy is Initializable, OwnableUpgradeSafe, Helper {
 
     event Initialized(address indexed thisAddress);
 
-    function initialize() public initializer {
+    function initialize(address _advisor) public initializer {
         OwnableUpgradeSafe.__Ownable_init();
+        OwnableUpgradeSafe.transferOwnership(_advisor);
         emit Initialized(address(this));
     }
 
-    function investYearn(
-        address[] memory yearnVault,
-        uint256[] memory _amount
-    ) external {
-        require(
-            yearnVault.length == _amount.length,
-            "Sanity Check: Yearn Vault"
-        );
-        for (uint256 i = 0; i < _amount.length; i++) {
-            if (yearnVault[i] == getETHVault()) {
-                YearnVault(yearnVault[i]).depositETH{value: _amount[i]}();
-            } else {
-                // since having stable amount for yearn is not mandatory
-                if (_amount[i] > 0) {
-                    YearnVault(yearnVault[i]).deposit(_amount[1]);
-                }
-            }
+    /**
+        Investor deposits liquidity to advisor pools
+        @param stableAssetAmount stable asset amount.
+        @param volatileAssetAmount volatile asset amount.
+     */
+    function investYearn(uint256 stableAssetAmount, uint256 volatileAssetAmount)
+        external
+    {   require(volatileAssetAmount > 0 || stableAssetAmount > 0, "Both Amounts cannot be 0");
+        if (volatileAssetAmount > 0) {
+            YearnVault(getETHVault()).depositETH{value: volatileAssetAmount}();
+        }
+        if (stableAssetAmount > 0) {
+            YearnVault(getUSDCVault()).deposit(stableAssetAmount);
         }
     }
 
-    function redeemAmount(
+
+
+    /**
+        Advisor redeems lquidity from the stable protocol
+        @param _investor investor address
+        @param _advisor advisor address
+        @param _stablecoin address of stable coin.
+        @param _investorVolatilePoolLiquidity volatile pool token balance of the investor.
+        @param advisorVolatilePoolToken address of advisors volatile pool token.
+        @param volatileProtocolStableCoinProportion stable coin proportion in volatile pool.
+        @param volatileProtocolVolatileCoinProportion volatile coin proportion in volatile pool.
+        // Reusing some vars due to stack too deep error
+     */
+  function redeemAmount(
         address _investor,
         address _advisor,
-        address[] calldata _vault,
         address _stablecoin,
-        uint256 _investorStablePoolLiquidity,
         uint256 _investorVolatilePoolLiquidity,
-        address advisorStablePoolToken,
         address advisorVolatilePoolToken,
-        uint256 yearnAdvisorProportion
-    ) external {
-        for (uint256 i = 0; i < _vault.length; i++) {
-            // had to reduce vars due to sol stack too deep error
-            if (_vault[i] == getETHVault()) {
-                uint256 poolTokenPrice = YearnVault(_vault[i]).balanceOf(address(this)).div(IERC20(advisorVolatilePoolToken).totalSupply());
-                uint256 investorRedeemAmount = _investorVolatilePoolLiquidity.mul(poolTokenPrice);
-                YearnVault(_vault[i]).withdrawETH(investorRedeemAmount);
-                uint256 investorReturns = getInvestorReturnAmount(_vault[i], investorRedeemAmount);
-                // 1 % per investor
-                uint256 advisorFee = (investorReturns.mul(1)).div(100);
-                investorReturns = investorReturns.sub(advisorFee);
-                (bool ethTransferCheck, ) = _advisor.call{
-            value: advisorFee
-            }("");
-                require(ethTransferCheck, "Advisor Transfer failed.");
-                (ethTransferCheck, ) = _investor.call{
-            value: investorReturns
-            }("");
-                require(ethTransferCheck, "Investor Transfer failed.");
-                // transfer eth to both
-            } else {
-                uint256 investorYearnLiquidity = _investorStablePoolLiquidity.mul(yearnAdvisorProportion).div(100);
-                uint256 investorRedeemAmount = investorYearnLiquidity.mul(YearnVault(_vault[i]).balanceOf(address(this)).div(IERC20(advisorStablePoolToken).totalSupply()));
-                YearnVault(_vault[i]).withdraw(investorRedeemAmount);
-                uint256 investorReturns = getInvestorReturnAmount(_vault[i], investorRedeemAmount);
-                // 1 % per investor
-                uint256 advisorFee = (investorReturns.mul(1)).div(100);
-                investorReturns = investorReturns.sub(advisorFee);
-                IERC20(_stablecoin).safeTransfer(_advisor, advisorFee);
-                IERC20(_stablecoin).safeTransfer(
-                    _investor,
-                    investorReturns
-                );
-            }
+        uint256 volatileProtocolStableCoinProportion,
+        uint256 volatileProtocolVolatileCoinProportion
+    ) external returns (uint256) {
+        uint256 stableAssetFees = 0;
+        uint256 volatileAssetFees = 0;
+        uint256 investorRedeemAmount = 0;
+        require(
+            _investorVolatilePoolLiquidity > 0,
+            "No Volatile Pool Liquidity"
+        );
+        // had to reduce vars due to sol stack too deep error
+        // investor token share * pool token price
+        investorRedeemAmount = _investorVolatilePoolLiquidity
+            .mul(volatileProtocolVolatileCoinProportion)
+            .div(100)
+            .mul(
+            YearnVault(getETHVault()).balanceOf(address(this)).div(
+                IERC20(advisorVolatilePoolToken).totalSupply()
+            )
+        );
+        YearnVault(getETHVault()).withdrawETH(investorRedeemAmount);
+        // resassigning var to avoid stack too deep
+        _investorVolatilePoolLiquidity = getInvestorReturnAmount(
+            getETHVault(),
+            investorRedeemAmount
+        );
+        if (_investor != _advisor) {
+            // 1 % per investor
+            volatileAssetFees = (_investorVolatilePoolLiquidity.mul(1)).div(
+                100
+            );
+            _investorVolatilePoolLiquidity = _investorVolatilePoolLiquidity.sub(
+                volatileAssetFees
+            );
+            (bool ethTransferCheck, ) = _advisor.call{value: volatileAssetFees}(
+                ""
+            );
+            require(ethTransferCheck, "Advisor Transfer failed.");
         }
+
+        (bool ethTransferCheck, ) = _investor.call{
+            value: _investorVolatilePoolLiquidity
+        }("");
+        require(ethTransferCheck, "Investor Transfer failed.");
+        // get the yearn stable pool proportion set by advisor and get the invesors share based on it
+        investorRedeemAmount = _investorVolatilePoolLiquidity
+            .mul(volatileProtocolStableCoinProportion)
+            .div(100)
+            .mul(
+            (YearnVault(getUSDCVault()).balanceOf(address(this)).mul(10**12)).div(
+                IERC20(advisorVolatilePoolToken).totalSupply()
+            )
+        );
+        YearnVault(getUSDCVault()).withdraw(investorRedeemAmount.div(10**12));
+        // resassigning var to avoid stack too deep
+        _investorVolatilePoolLiquidity = getInvestorReturnAmount(
+            getUSDCVault(),
+            investorRedeemAmount
+        );
+        if (_investor != _advisor) {
+            // 1 % per investor
+            stableAssetFees = (_investorVolatilePoolLiquidity.mul(1)).div(100);
+            _investorVolatilePoolLiquidity = _investorVolatilePoolLiquidity.sub(
+                stableAssetFees
+            );
+            IERC20(_stablecoin).safeTransfer(_advisor, stableAssetFees);
+        }
+        IERC20(_stablecoin).safeTransfer(
+            _investor,
+            _investorVolatilePoolLiquidity
+        );
+
+        return (stableAssetFees.add(volatileAssetFees));
     }
 
-    function getInvestorReturnAmount(address _vault, uint256 _investorRedeemAmount) internal returns(uint256) {
+    function getInvestorReturnAmount(
+        address _vault,
+        uint256 _investorRedeemAmount
+    ) internal returns (uint256) {
         address controller = YearnVault(_vault).controller();
         address token = YearnVault(_vault).token();
-        uint investorReturns = (YearnVault(_vault).balance().mul(_investorRedeemAmount)).div(YearnVault(_vault).totalSupply());
+        uint256 investorReturns = (
+            YearnVault(_vault).balance().mul(_investorRedeemAmount)
+        )
+            .div(YearnVault(_vault).totalSupply());
 
         // Check balance
-        uint b = IERC20(token).balanceOf(address(this));
+        uint256 b = IERC20(token).balanceOf(address(this));
         if (b < investorReturns) {
-            uint _withdraw = investorReturns.sub(b);
+            uint256 _withdraw = investorReturns.sub(b);
             YearnController(controller).withdraw(address(token), _withdraw);
-            uint _after = IERC20(token).balanceOf(address(this));
-            uint _diff = _after.sub(b);
+            uint256 _after = IERC20(token).balanceOf(address(this));
+            uint256 _diff = _after.sub(b);
             if (_diff < _withdraw) {
                 investorReturns = investorReturns.add(_diff);
             }

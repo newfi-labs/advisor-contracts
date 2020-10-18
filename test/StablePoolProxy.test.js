@@ -7,7 +7,7 @@ describe('StablePoolProxy', () => {
 
     beforeEach(async () => {
         contract = await StablePoolProxy.new({ from: owner });
-        await contract.initialize({ from: owner });
+        await contract.initialize(owner, { from: owner });
     });
 
     it('does stuff', () => {

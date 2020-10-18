@@ -8,12 +8,13 @@
   },
   "dependencies": {
     "@openzeppelin/cli": "^2.8.2",
-    "@openzeppelin/contracts-ethereum-package": "^3.0.0",
-    "@openzeppelin/contracts": "^3.2.0"
+    "@openzeppelin/contracts": "^3.2.0",
+    "@openzeppelin/contracts-ethereum-package": "^3.0.0"
   },
   "devDependencies": {
     "@openzeppelin/test-environment": "^0.1.5",
     "@openzeppelin/test-helpers": "^0.5.7",
+    "ganache-time-traveler": "^1.0.15",
     "husky": "^4.3.0",
     "jest": "^26.5.2"
   },

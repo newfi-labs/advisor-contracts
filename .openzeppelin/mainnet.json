@@ -1,0 +1,14 @@
+{
+  "contracts": {},
+  "solidityLibs": {},
+  "proxies": {
+    "advisor-contracts/NewfiAdvisor": [
+      {
+        "address": "0x1dFd8c77616b1c4Db2FaE35Ce8704950dA16B99d",
+        "kind": "NonProxy",
+        "bytecodeHash": "5eaa14dfef03c029f2e1ab113001737451e10b26817447fcdccbc075b9185b99"
+      }
+    ]
+  },
+  "manifestVersion": "2.2"
+}
