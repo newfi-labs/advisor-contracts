@@ -2,15 +2,15 @@
 
 pragma solidity ^0.6.0;
 
-import "@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/SafeERC20.sol";
-import "@openzeppelin/contracts-ethereum-package/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts-ethereum-package/contracts/Initializable.sol";
-import "@openzeppelin/contracts-ethereum-package/contracts/access/Ownable.sol";
-import "./proxy/StablePoolProxy.sol";
-import "./proxy/VolatilePoolProxy.sol";
-import "./utils/ProxyFactory.sol";
-import "./utils/AggregatorInterface.sol";
+import '@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/IERC20.sol';
+import '@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/SafeERC20.sol';
+import '@openzeppelin/contracts-ethereum-package/contracts/utils/ReentrancyGuard.sol';
+import '@openzeppelin/contracts-ethereum-package/contracts/Initializable.sol';
+import '@openzeppelin/contracts-ethereum-package/contracts/access/Ownable.sol';
+import './proxy/StablePoolProxy.sol';
+import './proxy/VolatilePoolProxy.sol';
+import './utils/ProxyFactory.sol';
+import './utils/AggregatorInterface.sol';
 
 contract NewfiAdvisor is
     Initializable,
@@ -100,16 +100,19 @@ contract NewfiAdvisor is
     ) external payable {
         require(
             advisorInfo[msg.sender].stablePool == address(0),
-            "Advisor exists"
+            'Advisor exists'
         );
         require(
             _volatileProtocolStableCoinProportion != 0 ||
                 _volatileProtocolVolatileCoinProportion != 0,
-            "Both Stable Proportions are 0"
+            'Both Stable Proportions are 0'
         );
         // msg.sender here would eb the advisor address
         address stablePool = createProxyPool(_stableProxyAddress, msg.sender);
-        address volatilePool = createProxyPool(_volatileProxyAddress, msg.sender);
+        address volatilePool = createProxyPool(
+            _volatileProxyAddress,
+            msg.sender
+        );
 
         advisorInfo[msg.sender] = Advisor(
             _name,
@@ -223,7 +226,7 @@ contract NewfiAdvisor is
         Investor storage investor = investorInfo[account];
         bool exists = false;
 
-        for (uint i = 0; i < investor.advisors.length; i++) {
+        for (uint256 i = 0; i < investor.advisors.length; i++) {
             if (advisors[i] == advisor) {
                 exists = true;
             }
@@ -236,8 +239,14 @@ contract NewfiAdvisor is
     /**
         @param _proxy address of proxy.
      */
-    function createProxyPool(address _proxy, address _advisor) internal returns (address) {
-        bytes memory _payload = abi.encodeWithSignature("initialize(address)", _advisor);
+    function createProxyPool(address _proxy, address _advisor)
+        internal
+        returns (address)
+    {
+        bytes memory _payload = abi.encodeWithSignature(
+            'initialize(address)',
+            _advisor
+        );
         return deployMinimal(_proxy, _payload);
     }
 
@@ -259,7 +268,7 @@ contract NewfiAdvisor is
     ) external payable {
         require(
             _stableProportion + _volatileProportion == 100,
-            "Need to invest 100% of funds"
+            'Need to invest 100% of funds'
         );
         Advisor storage advisor = advisorInfo[_advisor];
         IERC20 token = IERC20(_stablecoin);
@@ -281,8 +290,8 @@ contract NewfiAdvisor is
             );
         }
         if (msg.value > 0) {
-            (bool success, ) = advisor.volatilePool.call{value: msg.value}("");
-            require(success, "Transfer failed.");
+            (bool success, ) = advisor.volatilePool.call{value: msg.value}('');
+            require(success, 'Transfer failed.');
         }
         // converting to wei 10**18
         volatileInvest = volatileInvest.mul(10**12);

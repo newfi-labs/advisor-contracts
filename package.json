@@ -16,10 +16,14 @@
     "@openzeppelin/test-helpers": "^0.5.7",
     "ganache-time-traveler": "^1.0.15",
     "husky": "^4.3.0",
-    "jest": "^26.5.2"
+    "jest": "^26.5.2",
+    "lint-staged": "^10.4.2",
+    "prettier": "^2.1.2",
+    "prettier-plugin-solidity": "^1.0.0-alpha.59"
   },
   "scripts": {
-    "test": "oz compile && jest"
+    "test": "oz compile && jest",
+    "lint": "prettier --write **/*.{js,sol,json,md}"
   },
   "repository": {
     "type": "git",
@@ -30,5 +34,13 @@
   "bugs": {
     "url": "https://github.com/newfi-labs/advisor-contracts/issues"
   },
-  "homepage": "https://github.com/newfi-labs/advisor-contracts#readme"
+  "homepage": "https://github.com/newfi-labs/advisor-contracts#readme",
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged"
+    }
+  },
+  "lint-staged": {
+    "*.{js,json,md,sol}": "prettier --single-quote --trailing-comma=es5 --write"
+  }
 }
