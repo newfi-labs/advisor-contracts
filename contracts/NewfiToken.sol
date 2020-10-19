@@ -30,11 +30,6 @@ contract NewfiToken is ERC20UpgradeSafe, OwnableUpgradeSafe {
         ERC20UpgradeSafe.__ERC20_init(name, symbol);
     }
 
-    /**
-     * @dev mint new proof of ownership tokens.
-     * Minted = Invest * (wrappedTokens / poolTokens)
-     * At the start P = 1, therefore I = F, value = wrapped tokens
-     */
     function mintOwnershipTokens(
         address holder,
         uint256 poolTokens,
@@ -42,14 +37,7 @@ contract NewfiToken is ERC20UpgradeSafe, OwnableUpgradeSafe {
     ) public onlyOwner {
         require(toInvest > 0, 'Investment amount cannot be 0');
         uint256 safePoolSize = poolTokens <= 0 ? 1 : poolTokens;
-        uint256 tokenDecimals = 10**uint256(decimals());
-        uint256 wrappedTokens = totalSupply() == 0
-            ? 1
-            : totalSupply().div(tokenDecimals);
 
-        _mint(
-            holder,
-            (toInvest.mul(wrappedTokens).div(safePoolSize)).mul(tokenDecimals)
-        );
+        _mint(holder, toInvest.div(safePoolSize));
     }
 }

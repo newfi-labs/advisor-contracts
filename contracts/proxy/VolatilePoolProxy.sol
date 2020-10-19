@@ -68,21 +68,9 @@ contract VolatilePoolProxy is Initializable, OwnableUpgradeSafe, Helper {
     /**
         Investor deposits liquidity to advisor pools
         @param stableAssetAmount stable asset amount.
-        @param volatileAssetAmount volatile asset amount.
      */
-    function investYearn(uint256 stableAssetAmount, uint256 volatileAssetAmount)
-        external
-    {
-        require(
-            volatileAssetAmount > 0 || stableAssetAmount > 0,
-            'Both Amounts cannot be 0'
-        );
-        if (volatileAssetAmount > 0) {
-            YearnVault(getETHVault()).depositETH{value: volatileAssetAmount}();
-        }
-        if (stableAssetAmount > 0) {
-            YearnVault(getUSDCVault()).deposit(stableAssetAmount);
-        }
+    function investYearn(uint256 stableAssetAmount) external {
+        YearnVault(getUSDCVault()).deposit(stableAssetAmount);
     }
 
     /**
@@ -114,39 +102,35 @@ contract VolatilePoolProxy is Initializable, OwnableUpgradeSafe, Helper {
         );
         // had to reduce vars due to sol stack too deep error
         // investor token share * pool token price
+        IERC20(advisorVolatilePoolToken).safeTransfer(
+            address(0),
+            _investorVolatilePoolLiquidity
+        );
         investorRedeemAmount = _investorVolatilePoolLiquidity
             .mul(volatileProtocolVolatileCoinProportion)
-            .div(100)
-            .mul(
-            YearnVault(getETHVault()).balanceOf(address(this)).div(
-                IERC20(advisorVolatilePoolToken).totalSupply()
-            )
-        );
-        YearnVault(getETHVault()).withdrawETH(investorRedeemAmount);
-        // resassigning var to avoid stack too deep
-        _investorVolatilePoolLiquidity = getInvestorReturnAmount(
-            getETHVault(),
-            investorRedeemAmount
-        );
+            .div(100);
+        // since yearn eth vault deposit is disable now
+        // YearnVault(getETHVault()).withdrawETH(investorRedeemAmount);
+        // // resassigning var to avoid stack too deep
+        // _investorVolatilePoolLiquidity = getInvestorReturnAmount(
+        //     getETHVault(),
+        //     investorRedeemAmount
+        // );
         if (_investor != _advisor) {
             // 1 % per investor
-            volatileAssetFees = (_investorVolatilePoolLiquidity.mul(1)).div(
-                100
-            );
-            _investorVolatilePoolLiquidity = _investorVolatilePoolLiquidity.sub(
-                volatileAssetFees
-            );
+            volatileAssetFees = (investorRedeemAmount.mul(1)).div(100);
+            investorRedeemAmount = investorRedeemAmount.sub(volatileAssetFees);
             (bool ethTransferCheck, ) = _advisor.call{value: volatileAssetFees}(
                 ''
             );
             require(ethTransferCheck, 'Advisor Transfer failed.');
         }
 
-        (bool ethTransferCheck, ) = _investor.call{
-            value: _investorVolatilePoolLiquidity
-        }('');
+        (bool ethTransferCheck, ) = _investor.call{value: investorRedeemAmount}(
+            ''
+        );
         require(ethTransferCheck, 'Investor Transfer failed.');
-        // get the yearn stable pool proportion set by advisor and get the invesors share based on it
+        // get the yearn stable pool proportion set by advisor and get the investors share based on it
         investorRedeemAmount = _investorVolatilePoolLiquidity
             .mul(volatileProtocolStableCoinProportion)
             .div(100)
@@ -156,6 +140,7 @@ contract VolatilePoolProxy is Initializable, OwnableUpgradeSafe, Helper {
         );
         YearnVault(getUSDCVault()).withdraw(investorRedeemAmount.div(10**12));
         // resassigning var to avoid stack too deep
+        // getting principal + earnings
         _investorVolatilePoolLiquidity = getInvestorReturnAmount(
             getUSDCVault(),
             investorRedeemAmount

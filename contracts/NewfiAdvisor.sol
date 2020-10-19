@@ -77,9 +77,9 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
 
     address
         public constant savingContract = 0xcf3F73290803Fc04425BEE135a4Caeb2BaB2C2A1;
-    // usdc/eth aggregator
+    // usd/eth aggregator
     address
-        internal constant fiatRef = 0x986b5E1e1755e3C2440e960477f25201B0a8bbD4;
+        internal constant fiatRef = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419;
 
     address public stablePoolProxy;
     address public volatilePoolProxy;
@@ -178,13 +178,11 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             .balanceOf(advisor.volatilePool)
             .mul(YearnVault(getUSDCVault()).getPricePerFullShare());
         yearnPoolStableCoinInvestmentValue.mul(10**12);
-        uint256 yearnPoolVolatileCoinInvestmentValue = YearnVault(getETHVault())
-            .balanceOf(advisor.volatilePool)
-            .mul(YearnVault(getETHVault()).getPricePerFullShare());
-        return
-            yearnPoolStableCoinInvestmentValue.add(
-                yearnPoolVolatileCoinInvestmentValue
-            );
+
+        // converting int256 to uint256
+        uint256 usdQuote = uint256(AggregatorInterface(fiatRef).latestAnswer());
+        uint256 ethPoolValue = advisor.volatilePool.balance.mul(usdQuote);
+        return yearnPoolStableCoinInvestmentValue.add(ethPoolValue);
     }
 
     /**
@@ -330,17 +328,29 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         NewfiToken newfiStableToken = NewfiToken(advisor.stablePoolToken);
         NewfiToken newfiVolatileToken = NewfiToken(advisor.volatilePoolToken);
 
-        uint256 stableInvest = (_totalInvest * _stableProportion) / 100;
-        uint256 volatileInvest = (_totalInvest * _volatileProportion) / 100;
-
+        uint256 stableInvest = (_totalInvest.mul(_stableProportion)).div(100);
+        uint256 volatileInvest = (_totalInvest.mul(_volatileProportion)).div(
+            100
+        );
+        uint256 mintedVolatilePoolToken;
+        uint256 mintedStablePoolToken;
         if (stableInvest > 0) {
-            uint256 stablePoolSize = getStablePoolValue(_advisor) *
-                newfiStableToken.totalSupply();
+            uint256 stablePoolTokenPrice;
+            if (getStablePoolValue(_advisor) > 0) {
+                // calculating  P i.e price of the token
+                stablePoolTokenPrice = getStablePoolValue(_advisor).div(
+                    newfiStableToken.totalSupply()
+                );
+            } else {
+                stablePoolTokenPrice = 0;
+            }
+            // converting usdc to wei since pool token is of 18 decimals
+            mintedStablePoolToken = stableInvest.mul(10**12);
 
             newfiStableToken.mintOwnershipTokens(
                 msg.sender,
-                stablePoolSize,
-                stableInvest
+                stablePoolTokenPrice,
+                mintedStablePoolToken
             );
             token.safeTransferFrom(
                 msg.sender,
@@ -349,13 +359,21 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             );
         }
         if (volatileInvest > 0) {
-            uint256 volatilePoolSize = getVolatilePoolValue(_advisor) *
-                newfiVolatileToken.totalSupply();
+            uint256 volatilePoolTokenPrice;
+            if (getVolatilePoolValue(_advisor) > 0) {
+                // calculating  P i.e price of the token
+                volatilePoolTokenPrice = getVolatilePoolValue(_advisor).div(
+                    newfiVolatileToken.totalSupply()
+                );
+            } else {
+                volatilePoolTokenPrice = 0;
+            }
+            mintedVolatilePoolToken = volatileInvest.mul(10**12);
 
             newfiVolatileToken.mintOwnershipTokens(
                 msg.sender,
-                volatilePoolSize,
-                volatileInvest
+                volatilePoolTokenPrice,
+                mintedVolatilePoolToken.add(msg.value)
             );
             token.safeTransferFrom(
                 msg.sender,
@@ -375,18 +393,18 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         Investor storage investor = investorInfo[msg.sender];
         if (investor.doesExist) {
             investor.stablePoolLiquidity = investor.stablePoolLiquidity.add(
-                stableInvest
+                mintedStablePoolToken
             );
             investor.volatilePoolLiquidity = investor.volatilePoolLiquidity.add(
-                volatilePoolAmount
+                mintedVolatilePoolToken
             );
             addAdvisor(msg.sender, _advisor);
 
             // not including the pool token balance calculation at the moment
         } else {
             investorInfo[msg.sender] = Investor(
-                stableInvest,
-                volatilePoolAmount,
+                mintedStablePoolToken,
+                mintedVolatilePoolToken,
                 new address[](0),
                 true
             );
@@ -411,9 +429,9 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             advisor.volatilePool
         );
         // eth bal
-        uint256 volatileProtocolVolatileCoinInvestmentAmount = advisor
-            .volatilePool
-            .balance;
+        // uint256 volatileProtocolVolatileCoinInvestmentAmount = advisor
+        //     .volatilePool
+        //     .balance;
         // calling the functions in proxy contract since amount is stored there so broken them into 2 different proxies
         if (stableProtocolInvestmentAmount > 0) {
             StablePoolProxy(advisor.stablePool).investMStable(
@@ -424,16 +442,16 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             );
         }
         VolatilePoolProxy(advisor.volatilePool).investYearn(
-            volatileProtocolStableCoinInvestmentAmount,
-            volatileProtocolVolatileCoinInvestmentAmount
+            volatileProtocolStableCoinInvestmentAmount
+            // volatileProtocolVolatileCoinInvestmentAmount
         );
-        uint256 totalAmount = volatileProtocolStableCoinInvestmentAmount.add(
-            volatileProtocolVolatileCoinInvestmentAmount
-        );
+        // uint256 totalAmount = volatileProtocolStableCoinInvestmentAmount.add(
+        //     volatileProtocolVolatileCoinInvestmentAmount
+        //);
         emit ProtocolInvestment(
             msg.sender,
             stableProtocolInvestmentAmount,
-            totalAmount
+            volatileProtocolStableCoinInvestmentAmount
         );
     }
 

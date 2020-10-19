@@ -2,9 +2,9 @@
 
 pragma solidity ^0.6.0;
 
-import "@openzeppelin/contracts-ethereum-package/contracts/Initializable.sol";
-import "@openzeppelin/contracts-ethereum-package/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/SafeERC20.sol";
+import '@openzeppelin/contracts-ethereum-package/contracts/Initializable.sol';
+import '@openzeppelin/contracts-ethereum-package/contracts/access/Ownable.sol';
+import '@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/SafeERC20.sol';
 
 // would be a 2 step although all in 1 tx
 // for generating yield
@@ -84,6 +84,10 @@ contract StablePoolProxy is Initializable, OwnableUpgradeSafe {
         address advisorStablePoolToken
     ) external returns (uint256) {
         uint256 advisorFee = 0;
+        IERC20(advisorStablePoolToken).safeTransfer(
+            address(0),
+            _investorStablePoolLiquidity
+        );
         uint256 poolValue = SavingsContract(_savings)
             .creditBalances(address(this))
             .mul(SavingsContract(_savings).exchangeRate());

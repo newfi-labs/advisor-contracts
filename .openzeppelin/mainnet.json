@@ -7,6 +7,32 @@
         "address": "0x1dFd8c77616b1c4Db2FaE35Ce8704950dA16B99d",
         "kind": "NonProxy",
         "bytecodeHash": "5eaa14dfef03c029f2e1ab113001737451e10b26817447fcdccbc075b9185b99"
+      },
+      {
+        "address": "0x6584f484aA92493894391a084da0274A62Ab41Ca",
+        "kind": "NonProxy",
+        "bytecodeHash": "8def2f09f77e3be4c96fe20f90343bc1d00b326c11c4a9a68f6ea91ac3064342"
+      }
+    ],
+    "advisor-contracts/StablePoolProxy": [
+      {
+        "address": "0xd8a45d3e43Cc1c70780ad10eC9F3C8667ECe6e14",
+        "kind": "NonProxy",
+        "bytecodeHash": "c1459964c63efc2922068575f6b6702b7c6ef9124fbc8f1939f5b0e4101a123d"
+      }
+    ],
+    "advisor-contracts/VolatilePoolProxy": [
+      {
+        "address": "0x69ff13084F51bf13a66111696fB18d6280ac366A",
+        "kind": "NonProxy",
+        "bytecodeHash": "0fedd63aeee1b2f0376fd5456c612e84e1fd7974ceb2579682c0717809a8f2ec"
+      }
+    ],
+    "advisor-contracts/NewfiToken": [
+      {
+        "address": "0xd206F13c1252E74C99F11dA769E69C77Ec74A6CB",
+        "kind": "NonProxy",
+        "bytecodeHash": "0e71add37c4b6c104a28afa06915af1a6525c8ddeb211bc325d2bd5b11eda9ad"
       }
     ]
   },
