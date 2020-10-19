@@ -40,8 +40,8 @@ contract NewfiToken is ERC20UpgradeSafe, OwnableUpgradeSafe {
         uint256 poolTokens,
         uint256 toInvest
     ) public onlyOwner {
-        require(poolTokens > 0);
-        require(toInvest > 0);
+        require(toInvest > 0, 'Investment amount cannot be 0');
+        uint256 safePoolSize = poolTokens <= 0 ? 1 : poolTokens;
         uint256 tokenDecimals = 10**uint256(decimals());
         uint256 wrappedTokens = totalSupply() == 0
             ? 1
@@ -49,7 +49,7 @@ contract NewfiToken is ERC20UpgradeSafe, OwnableUpgradeSafe {
 
         _mint(
             holder,
-            (toInvest.mul(wrappedTokens).div(poolTokens)).mul(tokenDecimals)
+            (toInvest.mul(wrappedTokens).div(safePoolSize)).mul(tokenDecimals)
         );
     }
 }

@@ -5,19 +5,14 @@ pragma solidity ^0.6.0;
 import '@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/IERC20.sol';
 import '@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/SafeERC20.sol';
 import '@openzeppelin/contracts-ethereum-package/contracts/utils/ReentrancyGuard.sol';
-import '@openzeppelin/contracts-ethereum-package/contracts/Initializable.sol';
 import '@openzeppelin/contracts-ethereum-package/contracts/access/Ownable.sol';
 import './proxy/StablePoolProxy.sol';
 import './proxy/VolatilePoolProxy.sol';
 import './utils/ProxyFactory.sol';
 import './utils/AggregatorInterface.sol';
+import './NewfiToken.sol';
 
-contract NewfiAdvisor is
-    Initializable,
-    ReentrancyGuardUpgradeSafe,
-    ProxyFactory,
-    Helper
-{
+contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
 
@@ -71,6 +66,8 @@ contract NewfiAdvisor is
 
     address[] public advisors;
 
+    address[] public advisorTokens;
+
     address[] public investors;
 
     // Since it will be fixed
@@ -84,16 +81,30 @@ contract NewfiAdvisor is
     address
         internal constant fiatRef = 0x986b5E1e1755e3C2440e960477f25201B0a8bbD4;
 
+    address public stablePoolProxy;
+    address public volatilePoolProxy;
+    address public advisorToken;
+
+    /**
+        Constructor
+        @param _stablePool Address of the proxy contract defined above to create clones.
+    */
+    constructor(
+        address _stablePool,
+        address _volatilePool,
+        address _token
+    ) public {
+        stablePoolProxy = _stablePool;
+        volatilePoolProxy = _volatilePool;
+        advisorToken = _token;
+    }
+
     /**
         Onboards a new Advisor
         @param _name Name of the Advisor.
-        // IMP NOTE => will the creation of advisor's pool tokens would be done already ? if yes then we can pass those addresses here also
-        // Advisor will define their stratergy as well with the _mstableInvestmentProportion and _yearnInvestmentProportion
      */
-    function initialize(
+    function createAdvisor(
         string calldata _name,
-        address _stableProxyAddress,
-        address _volatileProxyAddress,
         // for volatile pool since volatile pool will be used for yearn investment
         uint256 _volatileProtocolStableCoinProportion,
         uint256 _volatileProtocolVolatileCoinProportion
@@ -108,9 +119,16 @@ contract NewfiAdvisor is
             'Both Stable Proportions are 0'
         );
         // msg.sender here would eb the advisor address
-        address stablePool = createProxyPool(_stableProxyAddress, msg.sender);
-        address volatilePool = createProxyPool(
-            _volatileProxyAddress,
+        address stablePool = createProxyPool(stablePoolProxy, msg.sender);
+        address volatilePool = createProxyPool(volatilePoolProxy, msg.sender);
+        address stablePoolToken = createPoolToken(
+            string(abi.encodePacked(_name, 'NewfiStableToken')),
+            'NST',
+            msg.sender
+        );
+        address volatilePoolToken = createPoolToken(
+            string(abi.encodePacked(_name, 'NewfiVolatileToken')),
+            'NVT',
             msg.sender
         );
 
@@ -118,8 +136,8 @@ contract NewfiAdvisor is
             _name,
             stablePool,
             address(uint160(volatilePool)),
-            address(0),
-            address(0),
+            stablePoolToken,
+            volatilePoolToken,
             _volatileProtocolStableCoinProportion,
             _volatileProtocolVolatileCoinProportion
         );
@@ -128,16 +146,15 @@ contract NewfiAdvisor is
         emit AdvisorOnBoarded(
             msg.sender,
             _name,
-            stablePool,
-            volatilePool,
-            address(0),
-            address(0),
+            stablePoolProxy,
+            volatilePoolProxy,
+            stablePoolToken,
+            volatilePoolToken,
             _volatileProtocolStableCoinProportion,
             _volatileProtocolVolatileCoinProportion
         );
     }
 
-    // IMP NOTE -> Right now these function will only give the pool value for the assets locked in mstable and yearn we can then get the total value in graph if needed we can tweak these functions to get the pool value of locked and unlocked assets direclty
     function getStablePoolValue(address _advisor)
         public
         view
@@ -148,11 +165,7 @@ contract NewfiAdvisor is
         uint256 mstablePoolInvestmentValue = SavingsContract(savingContract)
             .creditBalances(stablePool)
             .mul(SavingsContract(savingContract).exchangeRate());
-        // whitelisted vault addresses for now
-        uint256 yearnPoolInvestmentValue = YearnVault(getUSDCVault())
-            .balanceOf(advisor.volatilePool)
-            .mul(YearnVault(getUSDCVault()).getPricePerFullShare());
-        return mstablePoolInvestmentValue.add(yearnPoolInvestmentValue);
+        return mstablePoolInvestmentValue;
     }
 
     function getVolatilePoolValue(address _advisor)
@@ -161,10 +174,16 @@ contract NewfiAdvisor is
         returns (uint256)
     {
         Advisor storage advisor = advisorInfo[_advisor];
-        // whitelisted vault addresses for now
+        uint256 yearnPoolStableCoinInvestmentValue = YearnVault(getUSDCVault())
+            .balanceOf(advisor.volatilePool)
+            .mul(YearnVault(getUSDCVault()).getPricePerFullShare());
+        yearnPoolStableCoinInvestmentValue.mul(10**12);
+        uint256 yearnPoolVolatileCoinInvestmentValue = YearnVault(getETHVault())
+            .balanceOf(advisor.volatilePool)
+            .mul(YearnVault(getETHVault()).getPricePerFullShare());
         return
-            YearnVault(getETHVault()).balanceOf(advisor.volatilePool).mul(
-                YearnVault(getETHVault()).getPricePerFullShare()
+            yearnPoolStableCoinInvestmentValue.add(
+                yearnPoolVolatileCoinInvestmentValue
             );
     }
 
@@ -195,6 +214,18 @@ contract NewfiAdvisor is
         returns (uint256)
     {
         return investorInfo[account].stablePoolLiquidity;
+    }
+
+    /**
+     * @dev Returns an investors stable pool token balance.
+     */
+    function investorStablePoolTokens(address _advisor)
+        public
+        view
+        returns (uint256)
+    {
+        Advisor storage advisor = advisorInfo[_advisor];
+        return NewfiToken(advisor.stablePoolToken).balanceOf(msg.sender);
     }
 
     /**
@@ -237,7 +268,9 @@ contract NewfiAdvisor is
     }
 
     /**
+        Create an advisors proxy pool
         @param _proxy address of proxy.
+        @param _advisor address of advisor.
      */
     function createProxyPool(address _proxy, address _advisor)
         internal
@@ -251,13 +284,35 @@ contract NewfiAdvisor is
     }
 
     /**
+        Create an advisors token
+        @param _name of token.
+        @param _symbol of token.
+        @param _advisor address of advisor.
+     */
+    function createPoolToken(
+        string memory _name,
+        string memory _symbol,
+        address _advisor
+    ) internal returns (address) {
+        bytes memory payload = abi.encodeWithSignature(
+            'initialize(string,string)',
+            _name,
+            _symbol,
+            _advisor
+        );
+        address token = deployMinimal(advisorToken, payload);
+        advisorTokens.push(token);
+
+        return token;
+    }
+
+    /**
         Investor deposits liquidity to advisor pools
         @param _stablecoin address of stablecoin.
         @param _totalInvest amount of stable coin.
         @param _advisor address of selected advisor.
         @param _stableProportion stable coin proportion used to invest in protocols.
         @param _volatileProportion stable coin proportion used to invest in protocols.
-        // IMP NOTE => stablePoolLiquidity & volatilePoolLiquidity would be the bal of the pool tokens that the investor recieves currently just storing the deposited value
      */
     function invest(
         address _stablecoin,
@@ -272,10 +327,21 @@ contract NewfiAdvisor is
         );
         Advisor storage advisor = advisorInfo[_advisor];
         IERC20 token = IERC20(_stablecoin);
+        NewfiToken newfiStableToken = NewfiToken(advisor.stablePoolToken);
+        NewfiToken newfiVolatileToken = NewfiToken(advisor.volatilePoolToken);
+
         uint256 stableInvest = (_totalInvest * _stableProportion) / 100;
         uint256 volatileInvest = (_totalInvest * _volatileProportion) / 100;
 
         if (stableInvest > 0) {
+            uint256 stablePoolSize = getStablePoolValue(_advisor) *
+                newfiStableToken.totalSupply();
+
+            newfiStableToken.mintOwnershipTokens(
+                msg.sender,
+                stablePoolSize,
+                stableInvest
+            );
             token.safeTransferFrom(
                 msg.sender,
                 advisor.stablePool,
@@ -283,6 +349,14 @@ contract NewfiAdvisor is
             );
         }
         if (volatileInvest > 0) {
+            uint256 volatilePoolSize = getVolatilePoolValue(_advisor) *
+                newfiVolatileToken.totalSupply();
+
+            newfiVolatileToken.mintOwnershipTokens(
+                msg.sender,
+                volatilePoolSize,
+                volatileInvest
+            );
             token.safeTransferFrom(
                 msg.sender,
                 advisor.volatilePool,
@@ -307,6 +381,7 @@ contract NewfiAdvisor is
                 volatilePoolAmount
             );
             addAdvisor(msg.sender, _advisor);
+
             // not including the pool token balance calculation at the moment
         } else {
             investorInfo[msg.sender] = Investor(

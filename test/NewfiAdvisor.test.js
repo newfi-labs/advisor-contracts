@@ -1,19 +1,20 @@
 const {accounts, contract, web3} = require('@openzeppelin/test-environment');
-const {expectEvent, ether} = require('@openzeppelin/test-helpers');
+const {expectEvent, ether, BN} = require('@openzeppelin/test-helpers');
 const timeMachine = require('ganache-time-traveler');
 
 const NewfiAdvisor = contract.fromArtifact('NewfiAdvisor');
 const StablePoolProxy = contract.fromArtifact('StablePoolProxy');
 const VolatilePoolProxy = contract.fromArtifact('VolatilePoolProxy');
 const MockToken = contract.fromArtifact('MockToken');
+const NewfiToken = contract.fromArtifact('NewfiToken');
 const IERC20 = contract.fromArtifact('IERC20');
 
 describe('NewfiAdvisor', () => {
   const [mainAdvisor, secondAdvisor, investor] = accounts;
+  let divisor;
   let contract;
   let mockToken;
-  let stableProxy;
-  let volatileProxy;
+  let advisorToken;
   // mimicking mainnet scenario
   // const USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
   // const usdcInstance = IERC20.at(USDC);
@@ -22,32 +23,25 @@ describe('NewfiAdvisor', () => {
 
   beforeEach(async () => {
     // Proxy pools are initialized in the NewfiAdvisor init function.
-    stableProxy = await StablePoolProxy.new(mainAdvisor, {from: mainAdvisor});
-    volatileProxy = await VolatilePoolProxy.new(mainAdvisor, {
-      from: mainAdvisor,
-    });
-    contract = await NewfiAdvisor.new({from: mainAdvisor});
-    mockToken = await MockToken.new({from: mainAdvisor});
+    const stableProxy = await StablePoolProxy.new();
+    const volatileProxy = await VolatilePoolProxy.new();
+
+    divisor = new BN((10 ** 18).toString());
+    advisorToken = await NewfiToken.new();
+    mockToken = await MockToken.new();
+    contract = await NewfiAdvisor.new(
+      stableProxy.address,
+      volatileProxy.address,
+      advisorToken.address
+    );
 
     // Onboard a main advisor
-    await contract.initialize(
-      'Mock Advisor',
-      stableProxy.address,
-      volatileProxy.address,
-      60,
-      40,
-      {from: mainAdvisor}
-    );
+    await contract.createAdvisor('Mock Advisor', 60, 40, {from: mainAdvisor});
 
     // Onboard second advisor
-    await contract.initialize(
-      'Second Advisor',
-      stableProxy.address,
-      volatileProxy.address,
-      50,
-      50,
-      {from: secondAdvisor}
-    );
+    await contract.createAdvisor('Second Advisor', 50, 50, {
+      from: secondAdvisor,
+    });
   });
 
   describe('advisor', () => {
@@ -74,7 +68,11 @@ describe('NewfiAdvisor', () => {
         0,
         {from: investor}
       );
+      const tokens = await contract.investorStablePoolTokens(mainAdvisor, {
+        from: investor,
+      });
 
+      expect(tokens.div(divisor).toString()).toEqual('1000');
       expectEvent(receipt, 'Investment', {
         investor: investor,
         _stablecoinAmount: '1000',
@@ -239,7 +237,7 @@ describe('NewfiAdvisor', () => {
     //         yearnShare: '1000'
     //     });
     // });
-    //
+
     // it('can invest the funds into protocol and unwind the position', async () => {
     //     await usdcInstance.approve(contract.address, 10000000, {from : unlockAddress});
     //     let receipt = await contract.invest(

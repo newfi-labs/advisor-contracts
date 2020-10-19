@@ -23,7 +23,7 @@
   },
   "scripts": {
     "test": "oz compile && jest",
-    "lint": "prettier --write **/*.{js,sol,json,md}"
+    "lint": "prettier --single-quote --trailing-comma=es5 --write **/*.{js,sol,json,md}"
   },
   "repository": {
     "type": "git",
