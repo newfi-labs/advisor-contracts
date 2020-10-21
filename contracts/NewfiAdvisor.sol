@@ -23,8 +23,8 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         address indexed volatilePool,
         address stablePoolToken,
         address volatilePoolToken,
-        uint256 volatileProtocolStableCoinProportion,
-        uint256 volatileProtocolVolatileCoinProportion
+        uint256 stableCoinMstableProportion,
+        uint256 stableCoinYearnProportion
     );
 
     event Investment(
@@ -49,8 +49,8 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         address stablePoolToken;
         address volatilePoolToken;
         // diffrentiated for stable coins
-        uint256 volatileProtocolStableCoinProportion;
-        uint256 volatileProtocolVolatileCoinProportion;
+        uint256 stableCoinMstableProportion;
+        uint256 stableCoinYearnProportion;
     }
 
     struct Investor {
@@ -106,17 +106,21 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
     function createAdvisor(
         string calldata _name,
         // for volatile pool since volatile pool will be used for yearn investment
-        uint256 _volatileProtocolStableCoinProportion,
-        uint256 _volatileProtocolVolatileCoinProportion
+        uint256 _stableCoinMstableProportion,
+        uint256 _stableCoinYearnProportion
     ) external payable {
         require(
             advisorInfo[msg.sender].stablePool == address(0),
             'Advisor exists'
         );
         require(
-            _volatileProtocolStableCoinProportion != 0 ||
-                _volatileProtocolVolatileCoinProportion != 0,
+            _stableCoinMstableProportion != 0 ||
+                _stableCoinYearnProportion != 0,
             'Both Stable Proportions are 0'
+        );
+        require(
+            _stableCoinMstableProportion.add(_stableCoinYearnProportion) == 100,
+            'Total Proportion is not 100'
         );
         // msg.sender here would eb the advisor address
         address stablePool = createProxyPool(stablePoolProxy, msg.sender);
@@ -138,8 +142,8 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             address(uint160(volatilePool)),
             stablePoolToken,
             volatilePoolToken,
-            _volatileProtocolStableCoinProportion,
-            _volatileProtocolVolatileCoinProportion
+            _stableCoinMstableProportion,
+            _stableCoinYearnProportion
         );
 
         advisors.push(msg.sender);
@@ -150,8 +154,8 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             volatilePoolProxy,
             stablePoolToken,
             volatilePoolToken,
-            _volatileProtocolStableCoinProportion,
-            _volatileProtocolVolatileCoinProportion
+            _stableCoinMstableProportion,
+            _stableCoinYearnProportion
         );
     }
 
@@ -165,7 +169,18 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         uint256 mstablePoolInvestmentValue = SavingsContract(savingContract)
             .creditBalances(stablePool)
             .mul(SavingsContract(savingContract).exchangeRate());
-        return mstablePoolInvestmentValue;
+
+        uint256 yearnPoolStableCoinInvestmentValue = YearnVault(getUSDCVault())
+            .balanceOf(advisor.volatilePool)
+            .mul(YearnVault(getUSDCVault()).getPricePerFullShare());
+        return
+            mstablePoolInvestmentValue.add(yearnPoolStableCoinInvestmentValue);
+    }
+
+    function getUsdcQuote(uint256 _ethAmount) public view returns (uint256) {
+        uint256 usdQuote = uint256(AggregatorInterface(fiatRef).latestAnswer());
+        // since usdQuote in 10**8 form
+        return (_ethAmount.mul(usdQuote)).div(10**8);
     }
 
     function getVolatilePoolValue(address _advisor)
@@ -174,15 +189,13 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         returns (uint256)
     {
         Advisor storage advisor = advisorInfo[_advisor];
-        uint256 yearnPoolStableCoinInvestmentValue = YearnVault(getUSDCVault())
-            .balanceOf(advisor.volatilePool)
-            .mul(YearnVault(getUSDCVault()).getPricePerFullShare());
-        yearnPoolStableCoinInvestmentValue.mul(10**12);
 
         // converting int256 to uint256
         uint256 usdQuote = uint256(AggregatorInterface(fiatRef).latestAnswer());
-        uint256 ethPoolValue = advisor.volatilePool.balance.mul(usdQuote);
-        return yearnPoolStableCoinInvestmentValue.add(ethPoolValue);
+        uint256 ethPoolValue = (advisor.volatilePool.balance.mul(usdQuote)).div(
+            10**8
+        );
+        return ethPoolValue;
     }
 
     /**
@@ -309,32 +322,29 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         @param _stablecoin address of stablecoin.
         @param _totalInvest amount of stable coin.
         @param _advisor address of selected advisor.
-        @param _stableProportion stable coin proportion used to invest in protocols.
-        @param _volatileProportion stable coin proportion used to invest in protocols.
      */
     function invest(
         address _stablecoin,
         uint256 _totalInvest,
-        address _advisor,
-        uint256 _stableProportion,
-        uint256 _volatileProportion
-    ) external payable {
-        require(
-            _stableProportion + _volatileProportion == 100,
-            'Need to invest 100% of funds'
-        );
+        address _advisor
+    )
+        external
+        payable
+    // since we have now changed the logic with all usdc in stable and eth in volatile
+    // uint256 _stableProportion,
+    // uint256 _volatileProportion
+    {
         Advisor storage advisor = advisorInfo[_advisor];
         IERC20 token = IERC20(_stablecoin);
         NewfiToken newfiStableToken = NewfiToken(advisor.stablePoolToken);
         NewfiToken newfiVolatileToken = NewfiToken(advisor.volatilePoolToken);
 
-        uint256 stableInvest = (_totalInvest.mul(_stableProportion)).div(100);
-        uint256 volatileInvest = (_totalInvest.mul(_volatileProportion)).div(
-            100
-        );
-        uint256 mintedVolatilePoolToken;
+        // uint256 stableInvest = (_totalInvest.mul(_stableProportion)).div(100);
+        // uint256 volatileInvest = (_totalInvest.mul(_volatileProportion)).div(
+        //     100
+        // );
         uint256 mintedStablePoolToken;
-        if (stableInvest > 0) {
+        if (_totalInvest > 0) {
             uint256 stablePoolTokenPrice;
             if (getStablePoolValue(_advisor) > 0) {
                 // calculating  P i.e price of the token
@@ -345,7 +355,7 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
                 stablePoolTokenPrice = 0;
             }
             // converting usdc to wei since pool token is of 18 decimals
-            mintedStablePoolToken = stableInvest.mul(10**12);
+            mintedStablePoolToken = _totalInvest.mul(10**12);
 
             newfiStableToken.mintOwnershipTokens(
                 msg.sender,
@@ -355,10 +365,10 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             token.safeTransferFrom(
                 msg.sender,
                 advisor.stablePool,
-                stableInvest
+                _totalInvest
             );
         }
-        if (volatileInvest > 0) {
+        if (msg.value > 0) {
             uint256 volatilePoolTokenPrice;
             if (getVolatilePoolValue(_advisor) > 0) {
                 // calculating  P i.e price of the token
@@ -368,27 +378,15 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             } else {
                 volatilePoolTokenPrice = 0;
             }
-            mintedVolatilePoolToken = volatileInvest.mul(10**12);
 
             newfiVolatileToken.mintOwnershipTokens(
                 msg.sender,
                 volatilePoolTokenPrice,
-                mintedVolatilePoolToken.add(msg.value)
+                msg.value
             );
-            token.safeTransferFrom(
-                msg.sender,
-                advisor.volatilePool,
-                volatileInvest
-            );
-        }
-        if (msg.value > 0) {
             (bool success, ) = advisor.volatilePool.call{value: msg.value}('');
             require(success, 'Transfer failed.');
         }
-        // converting to wei 10**18
-        volatileInvest = volatileInvest.mul(10**12);
-        // getting the total amount in volatile pool
-        uint256 volatilePoolAmount = volatileInvest.add(msg.value);
 
         Investor storage investor = investorInfo[msg.sender];
         if (investor.doesExist) {
@@ -396,7 +394,7 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
                 mintedStablePoolToken
             );
             investor.volatilePoolLiquidity = investor.volatilePoolLiquidity.add(
-                mintedVolatilePoolToken
+                msg.value
             );
             addAdvisor(msg.sender, _advisor);
 
@@ -404,14 +402,14 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         } else {
             investorInfo[msg.sender] = Investor(
                 mintedStablePoolToken,
-                mintedVolatilePoolToken,
+                msg.value,
                 new address[](0),
                 true
             );
             addAdvisor(msg.sender, _advisor);
         }
 
-        emit Investment(msg.sender, stableInvest, volatilePoolAmount, _advisor);
+        emit Investment(msg.sender, mintedStablePoolToken, msg.value, _advisor);
     }
 
     /**
@@ -425,34 +423,33 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         uint256 stableProtocolInvestmentAmount = token.balanceOf(
             advisor.stablePool
         );
-        uint256 volatileProtocolStableCoinInvestmentAmount = token.balanceOf(
-            advisor.volatilePool
-        );
+        // only investing stable coin in yearn and mstable eth will sit in the pool
+        // uint256 volatileProtocolStableCoinInvestmentAmount = token.balanceOf(
+        //     advisor.volatilePool
+        // );
         // eth bal
         // uint256 volatileProtocolVolatileCoinInvestmentAmount = advisor
         //     .volatilePool
         //     .balance;
         // calling the functions in proxy contract since amount is stored there so broken them into 2 different proxies
         if (stableProtocolInvestmentAmount > 0) {
-            StablePoolProxy(advisor.stablePool).investMStable(
+            StablePoolProxy(advisor.stablePool).invest(
                 massetAddress,
                 _stablecoin,
                 stableProtocolInvestmentAmount,
-                savingContract
+                savingContract,
+                advisor.stableCoinMstableProportion,
+                advisor.stableCoinYearnProportion
             );
         }
-        VolatilePoolProxy(advisor.volatilePool).investYearn(
-            volatileProtocolStableCoinInvestmentAmount
-            // volatileProtocolVolatileCoinInvestmentAmount
-        );
+        // VolatilePoolProxy(advisor.volatilePool).investYearn(
+        //     volatileProtocolStableCoinInvestmentAmount
+        //     // volatileProtocolVolatileCoinInvestmentAmount
+        // );
         // uint256 totalAmount = volatileProtocolStableCoinInvestmentAmount.add(
         //     volatileProtocolVolatileCoinInvestmentAmount
         //);
-        emit ProtocolInvestment(
-            msg.sender,
-            stableProtocolInvestmentAmount,
-            volatileProtocolStableCoinInvestmentAmount
-        );
+        emit ProtocolInvestment(msg.sender, stableProtocolInvestmentAmount, 0);
     }
 
     /**
@@ -472,7 +469,8 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             savingContract,
             _stablecoin,
             investor.stablePoolLiquidity,
-            advisor.stablePoolToken
+            advisor.stablePoolToken,
+            advisor.stableCoinMstableProportion
         );
 
         uint256 advisorVolatilePoolFees = VolatilePoolProxy(
@@ -482,11 +480,8 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             .redeemAmount(
             msg.sender,
             _advisor,
-            _stablecoin,
             investor.volatilePoolLiquidity,
-            advisor.volatilePoolToken,
-            advisor.volatileProtocolStableCoinProportion,
-            advisor.volatileProtocolVolatileCoinProportion
+            advisor.volatilePoolToken
         );
         emit Unwind(
             _advisor,
