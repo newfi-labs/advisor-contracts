@@ -7,3 +7,5 @@ Contracts for the advisor/investor portal
 `npm install` - install project dependencies
 
 `npx oz compile` - compile needed contracts
+
+`npx oz deploy` - deploy the contracts
