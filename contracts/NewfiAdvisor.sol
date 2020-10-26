@@ -60,9 +60,9 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         bool doesExist;
     }
 
-    mapping(address => Advisor) private advisorInfo;
+    mapping(address => Advisor) public advisorInfo;
 
-    mapping(address => Investor) private investorInfo;
+    mapping(address => Investor) public investorInfo;
 
     address[] public advisors;
 
