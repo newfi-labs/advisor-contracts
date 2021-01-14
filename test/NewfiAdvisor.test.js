@@ -20,11 +20,6 @@ describe('NewfiAdvisor', () => {
   let contract;
   let mockToken;
   let advisorToken;
-  // mimicking mainnet scenario
-  // const USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
-  // const usdcInstance = IERC20.at(USDC);
-  // // Account with mainnet usdc
-  // const unlockAddress = "0x2a549b4af9ec39b03142da6dc32221fc390b5533";
 
   beforeEach(async () => {
     const stableProxy = await StablePoolProxy.new();
@@ -49,8 +44,8 @@ describe('NewfiAdvisor', () => {
     // });
   });
 
-  describe('advisor', () => {
-    it('can get name', async () => {
+  describe('advisor contract', () => {
+    it('returns advisor name', async () => {
       const name = await contract.advisorName(mainAdvisor);
       expect(name).toEqual('Mock Advisor');
     });

@@ -34,13 +34,13 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         address indexed _advisor
     );
 
-    event ProtocolInvestment(
-        address indexed advisor,
-        uint256 mstableShare,
-        uint256 yearnShare
-    );
+    //    event ProtocolInvestment(
+    //        address indexed advisor,
+    //        uint256 mstableShare,
+    //        uint256 yearnShare
+    //    );
 
-    event Unwind(address indexed advisor, uint256 fess);
+    //    event Unwind(address indexed advisor, uint256 fess);
 
     struct Advisor {
         string name;
@@ -48,7 +48,6 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         address payable volatilePool;
         address stablePoolToken;
         address volatilePoolToken;
-        // diffrentiated for stable coins
         uint256 stableCoinMstableProportion;
         uint256 stableCoinYearnProportion;
     }
@@ -70,16 +69,11 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
 
     address[] public investors;
 
-    // Since it will be fixed
-    // in order to be used in the test cases
-    address
-        public constant massetAddress = 0xe2f2a5C287993345a840Db3B0845fbC70f5935a5;
-
-    address
-        public constant savingContract = 0xcf3F73290803Fc04425BEE135a4Caeb2BaB2C2A1;
-    // usd/eth aggregator
-    address
-        internal constant fiatRef = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419;
+    //    address
+    //        public constant savingContract = 0xcf3F73290803Fc04425BEE135a4Caeb2BaB2C2A1;
+    //    // usd/eth aggregator
+    //    address
+    //        internal constant fiatRef = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419;
 
     address public stablePoolProxy;
     address public volatilePoolProxy;
@@ -107,19 +101,18 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         string calldata _name,
         // for volatile pool since volatile pool will be used for yearn investment
         uint256 _stableCoinMstableProportion,
-        uint256 _stableCoinYearnProportion
+        uint256 _stableCoinAaveProportion
     ) external payable {
         require(
             advisorInfo[msg.sender].stablePool == address(0),
             'Advisor exists'
         );
         require(
-            _stableCoinMstableProportion != 0 ||
-                _stableCoinYearnProportion != 0,
+            _stableCoinMstableProportion != 0 || _stableCoinAaveProportion != 0,
             'Both Stable Proportions are 0'
         );
         require(
-            _stableCoinMstableProportion.add(_stableCoinYearnProportion) == 100,
+            _stableCoinMstableProportion.add(_stableCoinAaveProportion) == 100,
             'Total Proportion is not 100'
         );
         // msg.sender here would eb the advisor address
@@ -143,7 +136,7 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             stablePoolToken,
             volatilePoolToken,
             _stableCoinMstableProportion,
-            _stableCoinYearnProportion
+            _stableCoinAaveProportion
         );
 
         advisors.push(msg.sender);
@@ -155,48 +148,87 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             stablePoolToken,
             volatilePoolToken,
             _stableCoinMstableProportion,
-            _stableCoinYearnProportion
+            _stableCoinAaveProportion
         );
     }
 
-    function getStablePoolValue(address _advisor)
-        public
-        view
-        returns (uint256)
+    /**
+        Create an advisors proxy pool
+        @param _proxy address of proxy.
+        @param _advisor address of advisor.
+     */
+    function createProxyPool(address _proxy, address _advisor)
+        internal
+        returns (address)
     {
-        Advisor storage advisor = advisorInfo[_advisor];
-        address stablePool = advisor.stablePool;
-        uint256 mstablePoolInvestmentValue = SavingsContract(savingContract)
-            .creditBalances(stablePool)
-            .mul(SavingsContract(savingContract).exchangeRate());
-
-        uint256 yearnPoolStableCoinInvestmentValue = YearnVault(getUSDCVault())
-            .balanceOf(advisor.volatilePool)
-            .mul(YearnVault(getUSDCVault()).getPricePerFullShare());
-        return
-            mstablePoolInvestmentValue.add(yearnPoolStableCoinInvestmentValue);
-    }
-
-    function getUsdcQuote(uint256 _ethAmount) public view returns (uint256) {
-        uint256 usdQuote = uint256(AggregatorInterface(fiatRef).latestAnswer());
-        // since usdQuote in 10**8 form
-        return (_ethAmount.mul(usdQuote)).div(10**8);
-    }
-
-    function getVolatilePoolValue(address _advisor)
-        public
-        view
-        returns (uint256)
-    {
-        Advisor storage advisor = advisorInfo[_advisor];
-
-        // converting int256 to uint256
-        uint256 usdQuote = uint256(AggregatorInterface(fiatRef).latestAnswer());
-        uint256 ethPoolValue = (advisor.volatilePool.balance.mul(usdQuote)).div(
-            10**8
+        bytes memory _payload = abi.encodeWithSignature(
+            'initialize(address)',
+            _advisor
         );
-        return ethPoolValue;
+        return deployMinimal(_proxy, _payload);
     }
+
+    /**
+        Create an advisors token
+        @param _name of token.
+        @param _symbol of token.
+        @param _advisor address of advisor.
+     */
+    function createPoolToken(
+        string memory _name,
+        string memory _symbol,
+        address _advisor
+    ) internal returns (address) {
+        bytes memory payload = abi.encodeWithSignature(
+            'initialize(string,string)',
+            _name,
+            _symbol,
+            _advisor
+        );
+        address token = deployMinimal(advisorToken, payload);
+        advisorTokens.push(token);
+
+        return token;
+    }
+
+    //    function getStablePoolValue(address _advisor)
+    //        public
+    //        view
+    //        returns (uint256)
+    //    {
+    //        Advisor storage advisor = advisorInfo[_advisor];
+    //        address stablePool = advisor.stablePool;
+    //        uint256 mstablePoolInvestmentValue = SavingsContract(savingContract)
+    //            .creditBalances(stablePool)
+    //            .mul(SavingsContract(savingContract).exchangeRate());
+    //
+    //        uint256 yearnPoolStableCoinInvestmentValue = YearnVault(getUSDCVault())
+    //            .balanceOf(advisor.volatilePool)
+    //            .mul(YearnVault(getUSDCVault()).getPricePerFullShare());
+    //        return
+    //            mstablePoolInvestmentValue.add(yearnPoolStableCoinInvestmentValue);
+    //    }
+    //
+    //    function getUsdcQuote(uint256 _ethAmount) public view returns (uint256) {
+    //        uint256 usdQuote = uint256(AggregatorInterface(fiatRef).latestAnswer());
+    //        // since usdQuote in 10**8 form
+    //        return (_ethAmount.mul(usdQuote)).div(10**8);
+    //    }
+    //
+    //    function getVolatilePoolValue(address _advisor)
+    //        public
+    //        view
+    //        returns (uint256)
+    //    {
+    //        Advisor storage advisor = advisorInfo[_advisor];
+    //
+    //        // converting int256 to uint256
+    //        uint256 usdQuote = uint256(AggregatorInterface(fiatRef).latestAnswer());
+    //        uint256 ethPoolValue = (advisor.volatilePool.balance.mul(usdQuote)).div(
+    //            10**8
+    //        );
+    //        return ethPoolValue;
+    //    }
 
     /**
      * @dev Returns the name of the advisor.
@@ -276,45 +308,6 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         if (!exists) {
             investor.advisors.push(advisor);
         }
-    }
-
-    /**
-        Create an advisors proxy pool
-        @param _proxy address of proxy.
-        @param _advisor address of advisor.
-     */
-    function createProxyPool(address _proxy, address _advisor)
-        internal
-        returns (address)
-    {
-        bytes memory _payload = abi.encodeWithSignature(
-            'initialize(address)',
-            _advisor
-        );
-        return deployMinimal(_proxy, _payload);
-    }
-
-    /**
-        Create an advisors token
-        @param _name of token.
-        @param _symbol of token.
-        @param _advisor address of advisor.
-     */
-    function createPoolToken(
-        string memory _name,
-        string memory _symbol,
-        address _advisor
-    ) internal returns (address) {
-        bytes memory payload = abi.encodeWithSignature(
-            'initialize(string,string)',
-            _name,
-            _symbol,
-            _advisor
-        );
-        address token = deployMinimal(advisorToken, payload);
-        advisorTokens.push(token);
-
-        return token;
     }
 
     /**
@@ -417,75 +410,75 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         @param _stablecoin address of stablecoin to invest in mstable, will take usdc for hack.
         // IMP NOTE => _mstableInvestmentAmount & _yearnInvestmentAmountsw will be based on the advisors mstable and yearn proportions
      */
-    function protocolInvestment(address _stablecoin) external {
-        Advisor storage advisor = advisorInfo[msg.sender];
-        IERC20 token = IERC20(_stablecoin);
-        uint256 stableProtocolInvestmentAmount = token.balanceOf(
-            advisor.stablePool
-        );
-        // only investing stable coin in yearn and mstable eth will sit in the pool
-        // uint256 volatileProtocolStableCoinInvestmentAmount = token.balanceOf(
-        //     advisor.volatilePool
-        // );
-        // eth bal
-        // uint256 volatileProtocolVolatileCoinInvestmentAmount = advisor
-        //     .volatilePool
-        //     .balance;
-        // calling the functions in proxy contract since amount is stored there so broken them into 2 different proxies
-        if (stableProtocolInvestmentAmount > 0) {
-            StablePoolProxy(advisor.stablePool).invest(
-                massetAddress,
-                _stablecoin,
-                stableProtocolInvestmentAmount,
-                savingContract,
-                advisor.stableCoinMstableProportion,
-                advisor.stableCoinYearnProportion
-            );
-        }
-        // VolatilePoolProxy(advisor.volatilePool).investYearn(
-        //     volatileProtocolStableCoinInvestmentAmount
-        //     // volatileProtocolVolatileCoinInvestmentAmount
-        // );
-        // uint256 totalAmount = volatileProtocolStableCoinInvestmentAmount.add(
-        //     volatileProtocolVolatileCoinInvestmentAmount
-        //);
-        emit ProtocolInvestment(msg.sender, stableProtocolInvestmentAmount, 0);
-    }
+    //    function protocolInvestment(address _stablecoin) external {
+    //        Advisor storage advisor = advisorInfo[msg.sender];
+    //        IERC20 token = IERC20(_stablecoin);
+    //        uint256 stableProtocolInvestmentAmount = token.balanceOf(
+    //            advisor.stablePool
+    //        );
+    //        // only investing stable coin in yearn and mstable eth will sit in the pool
+    //        // uint256 volatileProtocolStableCoinInvestmentAmount = token.balanceOf(
+    //        //     advisor.volatilePool
+    //        // );
+    //        // eth bal
+    //        // uint256 volatileProtocolVolatileCoinInvestmentAmount = advisor
+    //        //     .volatilePool
+    //        //     .balance;
+    //        // calling the functions in proxy contract since amount is stored there so broken them into 2 different proxies
+    //        if (stableProtocolInvestmentAmount > 0) {
+    //            StablePoolProxy(advisor.stablePool).invest(
+    //                massetAddress,
+    //                _stablecoin,
+    //                stableProtocolInvestmentAmount,
+    //                savingContract,
+    //                advisor.stableCoinMstableProportion,
+    //                advisor.stableCoinYearnProportion
+    //            );
+    //        }
+    //        // VolatilePoolProxy(advisor.volatilePool).investYearn(
+    //        //     volatileProtocolStableCoinInvestmentAmount
+    //        //     // volatileProtocolVolatileCoinInvestmentAmount
+    //        // );
+    //        // uint256 totalAmount = volatileProtocolStableCoinInvestmentAmount.add(
+    //        //     volatileProtocolVolatileCoinInvestmentAmount
+    //        //);
+    //        emit ProtocolInvestment(msg.sender, stableProtocolInvestmentAmount, 0);
+    //    }
 
     /**
         Investor Unwinding their position
         @param _advisor Address of the advisor.
         @param _stablecoin address of stablecoin to invest in mstable, will take usdc for hack.
      */
-    function unwind(address _advisor, address _stablecoin) external {
-        Investor storage investor = investorInfo[msg.sender];
-        Advisor storage advisor = advisorInfo[_advisor];
-
-        uint256 advisorStablePoolFees = StablePoolProxy(advisor.stablePool)
-            .redeemAmount(
-            msg.sender,
-            _advisor,
-            massetAddress,
-            savingContract,
-            _stablecoin,
-            investor.stablePoolLiquidity,
-            advisor.stablePoolToken,
-            advisor.stableCoinMstableProportion
-        );
-
-        uint256 advisorVolatilePoolFees = VolatilePoolProxy(
-            advisor
-                .volatilePool
-        )
-            .redeemAmount(
-            msg.sender,
-            _advisor,
-            investor.volatilePoolLiquidity,
-            advisor.volatilePoolToken
-        );
-        emit Unwind(
-            _advisor,
-            advisorStablePoolFees.add(advisorVolatilePoolFees)
-        );
-    }
+    //    function unwind(address _advisor, address _stablecoin) external {
+    //        Investor storage investor = investorInfo[msg.sender];
+    //        Advisor storage advisor = advisorInfo[_advisor];
+    //
+    //        uint256 advisorStablePoolFees = StablePoolProxy(advisor.stablePool)
+    //            .redeemAmount(
+    //            msg.sender,
+    //            _advisor,
+    //            massetAddress,
+    //            savingContract,
+    //            _stablecoin,
+    //            investor.stablePoolLiquidity,
+    //            advisor.stablePoolToken,
+    //            advisor.stableCoinMstableProportion
+    //        );
+    //
+    //        uint256 advisorVolatilePoolFees = VolatilePoolProxy(
+    //            advisor
+    //                .volatilePool
+    //        )
+    //            .redeemAmount(
+    //            msg.sender,
+    //            _advisor,
+    //            investor.volatilePoolLiquidity,
+    //            advisor.volatilePoolToken
+    //        );
+    //        emit Unwind(
+    //            _advisor,
+    //            advisorStablePoolFees.add(advisorVolatilePoolFees)
+    //        );
+    //    }
 }
