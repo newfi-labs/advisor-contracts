@@ -6,11 +6,12 @@ import '@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/IERC20.so
 import '@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/SafeERC20.sol';
 import '@openzeppelin/contracts-ethereum-package/contracts/utils/ReentrancyGuard.sol';
 import '@openzeppelin/contracts-ethereum-package/contracts/access/Ownable.sol';
-import './proxy/StablePoolProxy.sol';
-import './proxy/VolatilePoolProxy.sol';
-import './utils/ProxyFactory.sol';
-import './utils/AggregatorInterface.sol';
-import './NewfiToken.sol';
+import '../proxy/StablePoolProxy.sol';
+import '../proxy/VolatilePoolProxy.sol';
+import '../utils/ProxyFactory.sol';
+import '../utils/AggregatorInterface.sol';
+import '../tokens/NewfiToken.sol';
+import '../libraries/InvestmentData.sol';
 
 contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
     using SafeERC20 for IERC20;
@@ -42,16 +43,6 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
 
     //    event Unwind(address indexed advisor, uint256 fess);
 
-    struct Advisor {
-        string name;
-        address stablePool;
-        address payable volatilePool;
-        address stablePoolToken;
-        address volatilePoolToken;
-        uint256 stableCoinMstableProportion;
-        uint256 stableCoinYearnProportion;
-    }
-
     struct Investor {
         uint256 stablePoolLiquidity;
         uint256 volatilePoolLiquidity;
@@ -59,7 +50,7 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         bool doesExist;
     }
 
-    mapping(address => Advisor) public advisorInfo;
+    mapping(address => InvestmentData.Advisor) public advisorInfo;
 
     mapping(address => Investor) public investorInfo;
 
@@ -129,7 +120,7 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
             msg.sender
         );
 
-        advisorInfo[msg.sender] = Advisor(
+        advisorInfo[msg.sender] = InvestmentData.Advisor(
             _name,
             stablePool,
             address(uint160(volatilePool)),
@@ -267,7 +258,7 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         view
         returns (uint256)
     {
-        Advisor storage advisor = advisorInfo[_advisor];
+        InvestmentData.Advisor storage advisor = advisorInfo[_advisor];
         return NewfiToken(advisor.stablePoolToken).balanceOf(msg.sender);
     }
 
@@ -316,94 +307,94 @@ contract NewfiAdvisor is ReentrancyGuardUpgradeSafe, ProxyFactory, Helper {
         @param _totalInvest amount of stable coin.
         @param _advisor address of selected advisor.
      */
-    function invest(
-        address _stablecoin,
-        uint256 _totalInvest,
-        address _advisor
-    )
-        external
-        payable
-    // since we have now changed the logic with all usdc in stable and eth in volatile
-    // uint256 _stableProportion,
-    // uint256 _volatileProportion
-    {
-        Advisor storage advisor = advisorInfo[_advisor];
-        IERC20 token = IERC20(_stablecoin);
-        NewfiToken newfiStableToken = NewfiToken(advisor.stablePoolToken);
-        NewfiToken newfiVolatileToken = NewfiToken(advisor.volatilePoolToken);
-
-        // uint256 stableInvest = (_totalInvest.mul(_stableProportion)).div(100);
-        // uint256 volatileInvest = (_totalInvest.mul(_volatileProportion)).div(
-        //     100
-        // );
-        uint256 mintedStablePoolToken;
-        if (_totalInvest > 0) {
-            uint256 stablePoolTokenPrice;
-            if (getStablePoolValue(_advisor) > 0) {
-                // calculating  P i.e price of the token
-                stablePoolTokenPrice = getStablePoolValue(_advisor).div(
-                    newfiStableToken.totalSupply()
-                );
-            } else {
-                stablePoolTokenPrice = 0;
-            }
-            // converting usdc to wei since pool token is of 18 decimals
-            mintedStablePoolToken = _totalInvest.mul(10**12);
-
-            newfiStableToken.mintOwnershipTokens(
-                msg.sender,
-                stablePoolTokenPrice,
-                mintedStablePoolToken
-            );
-            token.safeTransferFrom(
-                msg.sender,
-                advisor.stablePool,
-                _totalInvest
-            );
-        }
-        if (msg.value > 0) {
-            uint256 volatilePoolTokenPrice;
-            if (getVolatilePoolValue(_advisor) > 0) {
-                // calculating  P i.e price of the token
-                volatilePoolTokenPrice = getVolatilePoolValue(_advisor).div(
-                    newfiVolatileToken.totalSupply()
-                );
-            } else {
-                volatilePoolTokenPrice = 0;
-            }
-
-            newfiVolatileToken.mintOwnershipTokens(
-                msg.sender,
-                volatilePoolTokenPrice,
-                msg.value
-            );
-            (bool success, ) = advisor.volatilePool.call{value: msg.value}('');
-            require(success, 'Transfer failed.');
-        }
-
-        Investor storage investor = investorInfo[msg.sender];
-        if (investor.doesExist) {
-            investor.stablePoolLiquidity = investor.stablePoolLiquidity.add(
-                mintedStablePoolToken
-            );
-            investor.volatilePoolLiquidity = investor.volatilePoolLiquidity.add(
-                msg.value
-            );
-            addAdvisor(msg.sender, _advisor);
-
-            // not including the pool token balance calculation at the moment
-        } else {
-            investorInfo[msg.sender] = Investor(
-                mintedStablePoolToken,
-                msg.value,
-                new address[](0),
-                true
-            );
-            addAdvisor(msg.sender, _advisor);
-        }
-
-        emit Investment(msg.sender, mintedStablePoolToken, msg.value, _advisor);
-    }
+    //    function invest(
+    //        address _stablecoin,
+    //        uint256 _totalInvest,
+    //        address _advisor
+    //    )
+    //        external
+    //        payable
+    //    // since we have now changed the logic with all usdc in stable and eth in volatile
+    //    // uint256 _stableProportion,
+    //    // uint256 _volatileProportion
+    //    {
+    //        Advisor storage advisor = advisorInfo[_advisor];
+    //        IERC20 token = IERC20(_stablecoin);
+    //        NewfiToken newfiStableToken = NewfiToken(advisor.stablePoolToken);
+    //        NewfiToken newfiVolatileToken = NewfiToken(advisor.volatilePoolToken);
+    //
+    //        // uint256 stableInvest = (_totalInvest.mul(_stableProportion)).div(100);
+    //        // uint256 volatileInvest = (_totalInvest.mul(_volatileProportion)).div(
+    //        //     100
+    //        // );
+    //        uint256 mintedStablePoolToken;
+    //        if (_totalInvest > 0) {
+    //            uint256 stablePoolTokenPrice;
+    //            if (getStablePoolValue(_advisor) > 0) {
+    //                // calculating  P i.e price of the token
+    //                stablePoolTokenPrice = getStablePoolValue(_advisor).div(
+    //                    newfiStableToken.totalSupply()
+    //                );
+    //            } else {
+    //                stablePoolTokenPrice = 0;
+    //            }
+    //            // converting usdc to wei since pool token is of 18 decimals
+    //            mintedStablePoolToken = _totalInvest.mul(10**12);
+    //
+    //            newfiStableToken.mintOwnershipTokens(
+    //                msg.sender,
+    //                stablePoolTokenPrice,
+    //                mintedStablePoolToken
+    //            );
+    //            token.safeTransferFrom(
+    //                msg.sender,
+    //                advisor.stablePool,
+    //                _totalInvest
+    //            );
+    //        }
+    //        if (msg.value > 0) {
+    //            uint256 volatilePoolTokenPrice;
+    //            if (getVolatilePoolValue(_advisor) > 0) {
+    //                // calculating  P i.e price of the token
+    //                volatilePoolTokenPrice = getVolatilePoolValue(_advisor).div(
+    //                    newfiVolatileToken.totalSupply()
+    //                );
+    //            } else {
+    //                volatilePoolTokenPrice = 0;
+    //            }
+    //
+    //            newfiVolatileToken.mintOwnershipTokens(
+    //                msg.sender,
+    //                volatilePoolTokenPrice,
+    //                msg.value
+    //            );
+    //            (bool success, ) = advisor.volatilePool.call{value: msg.value}('');
+    //            require(success, 'Transfer failed.');
+    //        }
+    //
+    //        Investor storage investor = investorInfo[msg.sender];
+    //        if (investor.doesExist) {
+    //            investor.stablePoolLiquidity = investor.stablePoolLiquidity.add(
+    //                mintedStablePoolToken
+    //            );
+    //            investor.volatilePoolLiquidity = investor.volatilePoolLiquidity.add(
+    //                msg.value
+    //            );
+    //            addAdvisor(msg.sender, _advisor);
+    //
+    //            // not including the pool token balance calculation at the moment
+    //        } else {
+    //            investorInfo[msg.sender] = Investor(
+    //                mintedStablePoolToken,
+    //                msg.value,
+    //                new address[](0),
+    //                true
+    //            );
+    //            addAdvisor(msg.sender, _advisor);
+    //        }
+    //
+    //        emit Investment(msg.sender, mintedStablePoolToken, msg.value, _advisor);
+    //    }
 
     /**
         Advisor Investing a particular investors pool liquidity
